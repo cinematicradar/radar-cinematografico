@@ -25,7 +25,7 @@ jobs:
         run: |
           pip install feedparser
           pip install pandas
-
+pip install reportlab
       - name: Rodar agente
         run: |
           python radar.py
