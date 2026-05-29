@@ -1,3 +1,5 @@
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
 import feedparser
 import pandas as pd
 import random
@@ -123,3 +125,40 @@ os.makedirs("resultados", exist_ok=True)
 df.to_csv("resultados/casos_cinematicos.csv", index=False)
 
 print("\n✅ RESULTADOS SALVOS")
+# =========================
+# GERAR PDF DOCUMENTAL
+# =========================
+
+pdf = SimpleDocTemplate("resultados/dossie_cinematografico.pdf")
+
+styles = getSampleStyleSheet()
+
+conteudo = []
+
+titulo = Paragraph(
+    "<b>RADAR CINEMATOGRÁFICO DE DESAPARECIMENTOS</b>",
+    styles['Title']
+)
+
+conteudo.append(titulo)
+conteudo.append(Spacer(1, 20))
+
+for index, row in df.head(15).iterrows():
+
+    texto = f"""
+    <b>Caso:</b> {row['Caso']}<br/>
+    <b>Score:</b> {row['Score']}<br/>
+    <b>Classificação:</b> {row['Classificação']}<br/>
+    <b>Atmosfera:</b> {row['Atmosfera']}<br/>
+    <b>Hook:</b> {row['Hook']}<br/>
+    <b>Link:</b> {row['Link']}<br/><br/>
+    """
+
+    paragrafo = Paragraph(texto, styles['BodyText'])
+
+    conteudo.append(paragrafo)
+    conteudo.append(Spacer(1, 20))
+
+pdf.build(conteudo)
+
+print("✅ PDF GERADO")
