@@ -26,10 +26,19 @@ jobs:
           pip install feedparser
           pip install pandas
           pip install reportlab
+          pip install requests
 
       - name: Rodar agente
         run: |
           python radar.py
+
+      - name: Enviar resultados para Google Sheets
+        env:
+          RADAR_WEBHOOK_URL: ${{ secrets.RADAR_WEBHOOK_URL }}
+          RADAR_TOKEN: ${{ secrets.RADAR_TOKEN }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python enviar_sheets.py
 
       - name: Salvar resultados
         uses: actions/upload-artifact@v4
