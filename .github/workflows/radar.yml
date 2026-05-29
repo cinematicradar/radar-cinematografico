@@ -29,3 +29,8 @@ jobs:
       - name: Rodar agente
         run: |
           python radar.py
+      - name: Salvar resultados
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultados-radar
+          path: resultados/
