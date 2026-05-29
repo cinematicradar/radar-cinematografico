@@ -113,8 +113,6 @@ df = df.sort_values(by="Score", ascending=False)
 
 print(df.head(20))
 
-df.to_csv("casos_cinematicos.csv", index=False)
-
 print("\n✅ RADAR CINEMATOGRÁFICO FINALIZADO")
 import os
 
