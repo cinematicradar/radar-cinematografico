@@ -116,3 +116,12 @@ print(df.head(20))
 df.to_csv("casos_cinematicos.csv", index=False)
 
 print("\n✅ RADAR CINEMATOGRÁFICO FINALIZADO")
+import os
+
+# Criar pasta de resultados
+os.makedirs("resultados", exist_ok=True)
+
+# Salvar CSV dentro da pasta
+df.to_csv("resultados/casos_cinematicos.csv", index=False)
+
+print("\n✅ RESULTADOS SALVOS")
