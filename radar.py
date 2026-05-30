@@ -3,6 +3,13 @@ from reportlab.lib.styles import getSampleStyleSheet
 import feedparser
 import pandas as pd
 import random
+import re
+def limpar_html(texto):
+    texto = re.sub(r'<[^>]+>', '', str(texto))
+    texto = texto.replace("&amp;", "&")
+    texto = texto.replace("&#39;", "'")
+    texto = texto.replace("&quot;", '"')
+    return texto.strip()
 
 rss_feeds = [
 
@@ -103,7 +110,9 @@ for entry in todos_posts:
 
     "Caso": entry.title,
 
-    "Resumo Original": getattr(entry, "summary", "")[:1500],
+    "Resumo Original": limpar_html(
+    getattr(entry, "summary", "")
+)[:1500],
 
     "Score": score,
 
