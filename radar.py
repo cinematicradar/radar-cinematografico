@@ -123,8 +123,8 @@ for entry in todos_posts:
 
     "Caso": entry.title,
 
-    "Resumo Original": limpar_html(
-    getattr(entry, "summary", "")
+  if post_vazio(resumo_original):
+    continue
 )[:1500],
 
     "Score": score,
