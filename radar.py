@@ -12,20 +12,18 @@ def limpar_html(texto):
     texto = texto.replace("&amp;", "&")
     texto = texto.replace("&#39;", "'")
     texto = texto.replace("&quot;", '"')
+    texto = texto.replace("&lt;", "<")
+    texto = texto.replace("&gt;", ">")
     return texto.strip()
 
 
-def post_vazio(resumo):
+def texto_inutil(resumo):
     resumo = str(resumo).lower().strip()
 
-    termos_lixo = [
-        "submitted by",
-        "[link]",
-        "[comments]"
-    ]
-
-    if not resumo or len(resumo) < 40:
+    if not resumo:
         return True
+
+    termos_lixo = ["submitted by", "[link]", "[comments]"]
 
     return all(termo in resumo for termo in termos_lixo)
 
@@ -33,16 +31,19 @@ def post_vazio(resumo):
 def score_cinematografico_v2(titulo, resumo):
     texto = f"{titulo} {resumo}".lower()
     score = 0
+    elementos = []
 
     regras = {
-        "missing": 15,
-        "disappearance": 15,
-        "vanished": 20,
-        "without trace": 25,
-        "gone": 10,
-        "unsolved": 20,
-        "cold case": 20,
-        "last seen": 20,
+        "missing": 20,
+        "disappearance": 20,
+        "disappeared": 20,
+        "vanished": 25,
+        "without trace": 30,
+        "unsolved": 25,
+        "cold case": 25,
+        "last seen": 25,
+        "never found": 25,
+        "still missing": 25,
         "cctv": 20,
         "camera": 15,
         "surveillance": 20,
@@ -51,33 +52,35 @@ def score_cinematografico_v2(titulo, resumo):
         "park": 15,
         "national park": 25,
         "mountain": 15,
-        "snow": 15,
-        "night": 10,
-        "hotel": 10,
-        "motel": 10,
-        "highway": 10,
+        "highway": 15,
         "road": 10,
+        "night": 10,
         "phone call": 15,
-        "strange": 10,
+        "strange": 15,
         "disturbing": 15,
         "creepy": 15,
+        "mysterious": 15,
+        "theory": 10,
         "theories": 15,
-        "multiple theories": 20,
         "child": 25,
         "teen": 15,
         "teenager": 15,
-        "still searching": 15,
-        "famous case": 20
+        "girl": 10,
+        "boy": 10,
+        "woman": 10,
+        "man": 10,
+        "family": 10,
+        "police": 10,
+        "investigation": 15,
+        "case": 10
     }
-
-    elementos_detectados = []
 
     for termo, pontos in regras.items():
         if termo in texto:
             score += pontos
-            elementos_detectados.append(termo)
+            elementos.append(termo)
 
-    return min(score, 100), elementos_detectados
+    return min(score, 100), elementos
 
 
 def potencial_documental(score):
@@ -85,7 +88,7 @@ def potencial_documental(score):
         return "Muito Alto"
     elif score >= 60:
         return "Alto"
-    elif score >= 40:
+    elif score >= 35:
         return "Médio"
     return "Baixo"
 
@@ -95,7 +98,7 @@ def relevancia_sem_rastros(score):
         return "ALTÍSSIMA"
     elif score >= 60:
         return "ALTA"
-    elif score >= 40:
+    elif score >= 35:
         return "MÉDIA"
     return "BAIXA"
 
@@ -105,9 +108,19 @@ def classificacao_caso(score):
         return "🔥 CASO NETFLIX"
     elif score >= 60:
         return "⚠️ MUITO FORTE"
-    elif score >= 40:
-        return "🟡 MÉDIO"
+    elif score >= 35:
+        return "🟡 OBSERVAR"
     return "⚪ BAIXO"
+
+
+def motivo_editorial(score, elementos):
+    if score >= 80:
+        return "Caso com forte potencial documental, atmosfera de mistério e elementos narrativos relevantes para vídeo longo."
+    elif score >= 60:
+        return "Caso promissor para investigação, com bons elementos para construção de roteiro."
+    elif score >= 35:
+        return "Caso deve ser observado. Pode render pauta se houver fontes complementares."
+    return "Caso fraco no momento, exige mais apuração antes de virar roteiro."
 
 
 rss_feeds = [
@@ -115,18 +128,6 @@ rss_feeds = [
     "https://www.reddit.com/r/MissingPersons/.rss",
     "https://www.reddit.com/r/TrueCrime/.rss",
     "https://www.reddit.com/r/UnsolvedMysteries/.rss"
-]
-
-
-palavras_chave = [
-    "missing",
-    "disappearance",
-    "vanished",
-    "gone",
-    "without trace",
-    "unsolved",
-    "last seen",
-    "cold case"
 ]
 
 
@@ -143,24 +144,31 @@ dados = []
 
 for entry in todos_posts:
     titulo_original = getattr(entry, "title", "")
-    titulo = titulo_original.lower()
     resumo_original = limpar_html(getattr(entry, "summary", ""))
+    link = getattr(entry, "link", "")
 
-    if post_vazio(resumo_original):
-        continue
-
-    texto_busca = f"{titulo} {resumo_original.lower()}"
-
-    if not any(p in texto_busca for p in palavras_chave):
+    if not titulo_original:
         continue
 
     score, elementos_detectados = score_cinematografico_v2(titulo_original, resumo_original)
+
+    # Não descarta automaticamente resumo ruim se o título for forte
+    if texto_inutil(resumo_original) and score < 35:
+        continue
+
+    # Só descarta se realmente não tiver nenhum sinal editorial
+    if score < 20:
+        continue
+
+    if not resumo_original or texto_inutil(resumo_original):
+        resumo_original = "Resumo não disponível no RSS. Avaliar o caso pelo título e abrir o link para apuração completa."
 
     hook = random.choice([
         "A última vez que alguém o viu... tudo parecia normal.",
         "As autoridades nunca conseguiram explicar o que aconteceu naquela noite.",
         "A última imagem registrada ainda causa arrepios.",
-        "Ele saiu normalmente... e nunca mais voltou."
+        "Ele saiu normalmente... e nunca mais voltou.",
+        "O caso parecia simples, até os detalhes começarem a não fazer sentido."
     ])
 
     dados.append({
@@ -171,30 +179,32 @@ for entry in todos_posts:
         "Relevância para Sem Rastros": relevancia_sem_rastros(score),
         "Classificação": classificacao_caso(score),
         "Atmosfera": ", ".join(elementos_detectados),
+        "Motivo Editorial": motivo_editorial(score, elementos_detectados),
         "Hook": hook,
-        "Link": getattr(entry, "link", "")
+        "Link": link
     })
 
 
 os.makedirs("resultados", exist_ok=True)
 
-if not dados:
-    print("⚠️ Nenhum caso válido encontrado nesta execução.")
-    print("✅ O script não quebrou. Apenas não houve posts compatíveis com os filtros.")
+colunas = [
+    "Caso",
+    "Resumo Original",
+    "Score",
+    "Potencial Documental",
+    "Relevância para Sem Rastros",
+    "Classificação",
+    "Atmosfera",
+    "Motivo Editorial",
+    "Hook",
+    "Link"
+]
 
-    df = pd.DataFrame(columns=[
-        "Caso",
-        "Resumo Original",
-        "Score",
-        "Potencial Documental",
-        "Relevância para Sem Rastros",
-        "Classificação",
-        "Atmosfera",
-        "Hook",
-        "Link"
-    ])
+if not dados:
+    df = pd.DataFrame(columns=colunas)
+    print("⚠️ Nenhum caso encontrado. O radar rodou, mas os feeds não trouxeram material suficiente.")
 else:
-    df = pd.DataFrame(dados)
+    df = pd.DataFrame(dados, columns=colunas)
     df = df.sort_values(by="Score", ascending=False)
 
 print(df.head(20))
@@ -220,7 +230,7 @@ conteudo.append(Spacer(1, 20))
 if df.empty:
     texto = """
     <b>Nenhum caso válido encontrado nesta execução.</b><br/>
-    O radar rodou corretamente, mas os feeds não retornaram posts compatíveis com os filtros atuais.
+    O radar rodou corretamente, mas os feeds não retornaram casos com pontuação mínima.
     """
     conteudo.append(Paragraph(texto, styles["BodyText"]))
 else:
@@ -233,6 +243,7 @@ else:
         <b>Relevância Sem Rastros:</b> {row['Relevância para Sem Rastros']}<br/>
         <b>Classificação:</b> {row['Classificação']}<br/>
         <b>Atmosfera:</b> {row['Atmosfera']}<br/>
+        <b>Motivo Editorial:</b> {row['Motivo Editorial']}<br/>
         <b>Hook:</b> {row['Hook']}<br/>
         <b>Link:</b> {row['Link']}<br/><br/>
         """
