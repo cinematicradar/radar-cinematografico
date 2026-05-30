@@ -9,76 +9,110 @@ import html
 from datetime import datetime
 
 
-# =========================
-# CONFIGURAÇÕES GERAIS
-# =========================
+# =========================================================
+# RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS - V4.1
+# =========================================================
 
 ANO_ATUAL = datetime.now().year
 
 PASTA_RESULTADOS = "resultados"
-CSV_SAIDA = f"{PASTA_RESULTADOS}/casos_cinematicos.csv"
-PDF_SAIDA = f"{PASTA_RESULTADOS}/dossie_cinematografico.pdf"
+CSV_SAIDA = os.path.join(PASTA_RESULTADOS, "casos_cinematicos.csv")
+PDF_SAIDA = os.path.join(PASTA_RESULTADOS, "dossie_cinematografico.pdf")
 
-rss_feeds = [
+RSS_FEEDS = [
     "https://www.reddit.com/r/UnresolvedMysteries/.rss",
     "https://www.reddit.com/r/MissingPersons/.rss",
     "https://www.reddit.com/r/TrueCrime/.rss",
-    "https://www.reddit.com/r/UnsolvedMysteries/.rss"
+    "https://www.reddit.com/r/UnsolvedMysteries/.rss",
+]
+
+USER_AGENT = "SemRastrosRadar/4.1"
+
+COLUNAS = [
+    "Caso",
+    "Resumo Original",
+    "Score",
+    "Potencial Documental",
+    "Relevância para Sem Rastros",
+    "Classificação",
+    "Tipo de Caso",
+    "Uso Recomendado",
+    "Decisão Editorial",
+    "Ano do Caso",
+    "Idade do Caso",
+    "Status Detectado",
+    "Segurança da Pauta",
+    "Elementos Detectados",
+    "Motivo Editorial",
+    "Hook",
+    "Link",
 ]
 
 
-# =========================
-# LIMPEZA E SEGURANÇA
-# =========================
+# =========================================================
+# LIMPEZA DE TEXTO
+# =========================================================
 
 def limpar_html(texto):
-    texto = str(texto)
+    texto = html.unescape(str(texto or ""))
     texto = re.sub(r"<[^>]+>", " ", texto)
-    texto = texto.replace("&amp;", "&")
-    texto = texto.replace("&#39;", "'")
-    texto = texto.replace("&quot;", '"')
-    texto = texto.replace("&lt;", "<")
-    texto = texto.replace("&gt;", ">")
-    texto = re.sub(r"\s+", " ", texto)
-    return texto.strip()
+    texto = re.sub(r"\s+", " ", texto).strip()
+
+    texto = re.sub(
+        r"\s*submitted by\s*/u/.*$",
+        "",
+        texto,
+        flags=re.IGNORECASE
+    ).strip()
+
+    texto = re.sub(
+        r"\s*\[link\]\s*\[comments\]\s*$",
+        "",
+        texto,
+        flags=re.IGNORECASE
+    ).strip()
+
+    texto = re.sub(r"\s+", " ", texto).strip()
+    return texto
 
 
 def seguro_pdf(texto):
-    return html.escape(str(texto))
+    return html.escape(str(texto or ""))
+
+
+def normalizar(texto):
+    return limpar_html(texto).lower()
 
 
 def contem(texto, termo):
-    """
-    Busca termo com fronteira de palavra.
-    Evita falso positivo tipo 'man' dentro de 'woman'.
-    """
+    texto = normalizar(texto)
     termo = termo.lower().strip()
-    texto = texto.lower()
-
     padrao = r"(?<!\w)" + re.escape(termo).replace(r"\ ", r"\s+") + r"(?!\w)"
-    return re.search(padrao, texto) is not None
+    return re.search(padrao, texto, flags=re.IGNORECASE) is not None
 
 
 def resumo_inutil(resumo):
-    resumo = limpar_html(resumo).lower()
+    resumo = limpar_html(resumo)
 
     if not resumo:
         return True
 
-    lixo = resumo
-    for termo in ["submitted by", "[link]", "[comments]", "comments", "link"]:
-        lixo = lixo.replace(termo, "")
+    texto = resumo.lower()
+    texto = texto.replace("submitted by", " ")
+    texto = texto.replace("[link]", " ")
+    texto = texto.replace("[comments]", " ")
+    texto = re.sub(r"[^a-zA-Z0-9À-ÿ]+", " ", texto).strip()
 
-    lixo = re.sub(r"[^a-zA-Z0-9À-ÿ]+", " ", lixo).strip()
-
-    return len(lixo) < 80
+    return len(texto) < 120
 
 
 def titulo_meta_ou_inutil(titulo):
-    titulo = titulo.lower()
+    titulo = normalizar(titulo)
 
-    termos_bloqueio = [
+    bloqueios = [
         "megathread",
+        "weekly thread",
+        "discussion thread",
         "podcast",
         "for a video",
         "researching",
@@ -87,214 +121,473 @@ def titulo_meta_ou_inutil(titulo):
         "what are your thoughts",
         "does anyone remember",
         "help me find",
-        "discussion thread",
-        "weekly thread"
+        "need help finding",
+        "case suggestions",
+        "where can i find",
     ]
 
-    return any(termo in titulo for termo in termos_bloqueio)
+    return any(b in titulo for b in bloqueios)
 
 
-def extrair_anos(texto):
-    anos = re.findall(r"\b(19[0-9]{2}|20[0-2][0-9])\b", texto)
-    return [int(a) for a in anos]
+# =========================================================
+# EXTRAÇÃO INTELIGENTE DO ANO DO CASO
+# =========================================================
+
+def extrair_ano_contextual(titulo, resumo):
+    texto_total = limpar_html(f"{titulo}. {resumo}")
+    texto = texto_total.lower()
+
+    termos_exclusao = [
+        "born",
+        "dob",
+        "date of birth",
+        "current age",
+        "age at disappearance",
+        "was born",
+        "released in",
+        "episode",
+        "podcast",
+        "article",
+        "documentary",
+        "case number",
+        "namus",
+        "report from",
+        "reports from",
+        "as of",
+    ]
+
+    padroes = [
+        r"(?:missing since|went missing|reported missing|last seen|last contacted|disappeared|vanished)\D{0,80}\b(19\d{2}|20[0-2]\d)\b",
+        r"(?:found dead|body was found|body found|remains were found|remains found|murdered|killed|homicide)\D{0,80}\b(19\d{2}|20[0-2]\d)\b",
+        r"\b(19\d{2}|20[0-2]\d)\b\D{0,80}(?:missing|disappeared|vanished|found dead|body was found|remains|murdered|killed|last seen)",
+    ]
+
+    candidatos = []
+
+    for prioridade, padrao in enumerate(padroes):
+        for match in re.finditer(padrao, texto, flags=re.IGNORECASE):
+            ano = int(match.group(1))
+
+            inicio = max(0, match.start() - 90)
+            fim = min(len(texto), match.end() + 90)
+            janela = texto[inicio:fim]
+
+            if any(ex in janela for ex in termos_exclusao):
+                continue
+
+            if 1900 <= ano <= ANO_ATUAL:
+                candidatos.append((prioridade, ano))
+
+    if candidatos:
+        candidatos.sort(key=lambda item: (item[0], -item[1]))
+        ano = candidatos[0][1]
+        return ano, ANO_ATUAL - ano
+
+    titulo_norm = normalizar(titulo)
+
+    if any(t in titulo_norm for t in [
+        "missing",
+        "disappeared",
+        "vanished",
+        "murder",
+        "jane doe",
+        "john doe",
+        "found dead",
+        "remains"
+    ]):
+        anos_titulo = [
+            int(a) for a in re.findall(r"\b(19\d{2}|20[0-2]\d)\b", titulo_norm)
+        ]
+
+        anos_validos = [a for a in anos_titulo if 1900 <= a <= ANO_ATUAL]
+
+        if anos_validos:
+            ano = max(anos_validos)
+            return ano, ANO_ATUAL - ano
+
+    return None, None
 
 
-# =========================
-# SCORE PROFISSIONAL V4
-# =========================
+# =========================================================
+# STATUS E TIPO DE CASO
+# =========================================================
+
+def detectar_status(titulo, resumo):
+    texto = normalizar(f"{titulo} {resumo}")
+
+    resolvido = any(contem(texto, termo) for termo in [
+        "killer identified",
+        "has been identified",
+        "identified the killer",
+        "has been named",
+        "arrested",
+        "case solved",
+        "solved",
+        "recovered the remains",
+        "remains have been recovered",
+        "body has been recovered",
+        "dna match",
+        "genetic genealogy breakthrough",
+    ])
+
+    aberto = any(contem(texto, termo) for termo in [
+        "still missing",
+        "never found",
+        "no trace",
+        "case is still open",
+        "unsolved",
+        "where is",
+        "what happened to",
+        "who was",
+        "who is",
+    ])
+
+    atualizacao = any(contem(texto, termo) for termo in [
+        "update",
+        "arrest",
+        "identified",
+        "named",
+        "recovered",
+        "breakthrough",
+    ])
+
+    if resolvido:
+        return "RESOLVIDO/ATUALIZAÇÃO"
+
+    if aberto:
+        return "ABERTO"
+
+    if atualizacao:
+        return "ATUALIZAÇÃO"
+
+    return "INDEFINIDO"
+
+
+def caso_famoso_ou_saturado(titulo):
+    titulo = normalizar(titulo)
+
+    famosos = [
+        "lars mittank",
+        "emanuela orlandi",
+        "brandon swanson",
+        "aarushi talwar",
+        "mary bell",
+        "madeleine mccann",
+        "elisa lam",
+        "brian shaffer",
+        "maura murray",
+    ]
+
+    return any(nome in titulo for nome in famosos)
+
+
+def detectar_tipo_caso(titulo, resumo, status):
+    texto = normalizar(f"{titulo} {resumo}")
+
+    if caso_famoso_ou_saturado(titulo):
+        return "CASO FAMOSO/SATURADO"
+
+    if status == "RESOLVIDO/ATUALIZAÇÃO":
+        return "CASO RESOLVIDO/ATUALIZAÇÃO"
+
+    if any(contem(texto, termo) for termo in [
+        "jane doe",
+        "john doe",
+        "unidentified body",
+        "unidentified remains",
+        "unidentified victim",
+    ]):
+        return "IDENTIDADE DESCONHECIDA"
+
+    if any(contem(texto, termo) for termo in [
+        "missing",
+        "disappeared",
+        "vanished",
+        "still missing",
+        "never found",
+    ]):
+        return "DESAPARECIMENTO ABERTO"
+
+    if any(contem(texto, termo) for termo in [
+        "murder",
+        "murdered",
+        "homicide",
+        "found dead",
+        "body found",
+    ]):
+        return "HOMICÍDIO/MORTE SUSPEITA"
+
+    return "CASO DE APOIO/PESQUISA"
+
+
+# =========================================================
+# SCORE PROFISSIONAL
+# =========================================================
+
+def pontuar_grupo(texto, regras, limite, elementos, categoria, modo="soma"):
+    pontos = 0
+    encontrados = []
+
+    for termo, valor in regras.items():
+        if contem(texto, termo):
+            encontrados.append((termo, valor))
+
+    if encontrados:
+        if modo == "max":
+            termo, valor = max(encontrados, key=lambda x: x[1])
+            pontos = valor
+            elementos.append(f"{termo} / {categoria}")
+        else:
+            for termo, valor in encontrados:
+                pontos += valor
+                elementos.append(f"{termo} / {categoria}")
+
+    return min(pontos, limite)
+
 
 def calcular_score_profissional(titulo, resumo):
     resumo_util = not resumo_inutil(resumo)
-
-    if resumo_util:
-        texto = f"{titulo} {resumo}".lower()
-    else:
-        texto = titulo.lower()
+    texto_base = f"{titulo} {resumo}" if resumo_util else titulo
+    texto = normalizar(texto_base)
 
     elementos = []
     categorias = {}
 
-    # 1. Mistério central — obrigatório para entrar forte
-    misterio = 0
-    termos_misterio = {
-        "missing": 18,
-        "disappearance": 18,
-        "disappeared": 18,
-        "vanished": 22,
-        "without trace": 25,
-        "no trace": 22,
-        "never found": 22,
-        "still missing": 22,
-        "unsolved": 18,
-        "cold case": 20,
-        "jane doe": 20,
-        "john doe": 20,
-        "unidentified": 18,
-        "body found": 14,
-        "remains": 14,
-        "murdered": 12,
-        "murder": 10
-    }
+    ano_caso, idade_caso = extrair_ano_contextual(titulo, resumo)
 
-    for termo, pontos in termos_misterio.items():
-        if contem(texto, termo):
-            misterio = max(misterio, pontos)
-            elementos.append(f"{termo} / mistério central")
+    categorias["Mistério Central"] = pontuar_grupo(
+        texto,
+        {
+            "missing": 16,
+            "disappearance": 16,
+            "disappeared": 16,
+            "vanished": 20,
+            "without trace": 22,
+            "no trace": 20,
+            "never found": 20,
+            "still missing": 20,
+            "unsolved": 16,
+            "cold case": 18,
+            "jane doe": 20,
+            "john doe": 20,
+            "unidentified body": 18,
+            "unidentified remains": 18,
+            "body found": 14,
+            "remains": 12,
+            "murdered": 12,
+            "murder": 10,
+            "homicide": 10,
+        },
+        24,
+        elementos,
+        "mistério central",
+        modo="max",
+    )
 
-    categorias["Mistério Central"] = min(misterio, 25)
-
-    # 2. Tempo sem solução
     tempo = 0
 
-    anos = extrair_anos(texto)
-    if anos:
-        ano_mais_antigo = min(anos)
-        idade_caso = ANO_ATUAL - ano_mais_antigo
-
+    if idade_caso is not None:
         if idade_caso >= 40:
-            tempo += 20
+            tempo = 15
             elementos.append(f"{idade_caso} anos sem resposta / tempo histórico")
         elif idade_caso >= 25:
-            tempo += 16
+            tempo = 12
             elementos.append(f"{idade_caso} anos sem resposta / tempo relevante")
         elif idade_caso >= 10:
-            tempo += 11
+            tempo = 9
             elementos.append(f"{idade_caso} anos sem resposta / caso antigo")
         elif idade_caso >= 3:
-            tempo += 6
+            tempo = 5
             elementos.append(f"{idade_caso} anos sem resposta / caso recente")
 
-    for termo, pontos in {
-        "decades": 18,
-        "50 years": 20,
-        "40 years": 18,
-        "30 years": 16,
-        "20 years": 14,
-        "10 years": 10,
-        "years later": 8
-    }.items():
-        if contem(texto, termo):
-            tempo = max(tempo, pontos)
-            elementos.append(f"{termo} / tempo sem solução")
+    tempo = max(
+        tempo,
+        pontuar_grupo(
+            texto,
+            {
+                "decades": 14,
+                "50 years": 15,
+                "40 years": 14,
+                "30 years": 12,
+                "20 years": 10,
+                "10 years": 8,
+                "years later": 6,
+            },
+            15,
+            elementos,
+            "tempo sem solução",
+            modo="max",
+        )
+    )
 
-    categorias["Tempo Sem Solução"] = min(tempo, 20)
+    categorias["Tempo Sem Solução"] = min(tempo, 15)
 
-    # 3. Último registro / prova visual
-    prova = 0
-    for termo, pontos in {
-        "last seen": 18,
-        "last image": 18,
-        "cctv": 20,
-        "surveillance": 18,
-        "footage": 16,
-        "camera": 12,
-        "photo": 8,
-        "photograph": 8,
-        "phone call": 10
-    }.items():
-        if contem(texto, termo):
-            prova += pontos
-            elementos.append(f"{termo} / último registro ou prova visual")
+    categorias["Prova Visual ou Último Registro"] = pontuar_grupo(
+        texto,
+        {
+            "last seen": 14,
+            "last contacted": 12,
+            "last image": 15,
+            "cctv": 16,
+            "surveillance": 15,
+            "security footage": 16,
+            "footage": 13,
+            "camera": 10,
+            "photograph": 8,
+            "photo": 7,
+            "phone call": 9,
+            "voicemail": 9,
+        },
+        17,
+        elementos,
+        "último registro ou prova visual",
+    )
 
-    categorias["Prova Visual ou Último Registro"] = min(prova, 20)
+    categorias["Ambiente Cinematográfico"] = pontuar_grupo(
+        texto,
+        {
+            "national park": 10,
+            "wilderness": 10,
+            "forest": 9,
+            "woods": 9,
+            "mountain": 9,
+            "airport": 9,
+            "island": 9,
+            "highway": 8,
+            "road": 6,
+            "river": 8,
+            "canal": 8,
+            "train": 8,
+            "hotel": 6,
+            "motel": 6,
+            "night": 6,
+            "snow": 6,
+            "desert": 6,
+            "trailhead": 8,
+        },
+        12,
+        elementos,
+        "cenário cinematográfico",
+    )
 
-    # 4. Ambiente cinematográfico
-    ambiente = 0
-    for termo, pontos in {
-        "national park": 14,
-        "forest": 12,
-        "woods": 12,
-        "mountain": 12,
-        "airport": 12,
-        "island": 12,
-        "highway": 10,
-        "road": 8,
-        "river": 10,
-        "canal": 10,
-        "train": 10,
-        "hotel": 8,
-        "motel": 8,
-        "night": 8,
-        "snow": 8,
-        "desert": 8
-    }.items():
-        if contem(texto, termo):
-            ambiente += pontos
-            elementos.append(f"{termo} / cenário cinematográfico")
+    categorias["Complexidade Investigativa"] = pontuar_grupo(
+        texto,
+        {
+            "false trails": 12,
+            "missing files": 12,
+            "foul play": 10,
+            "unknown": 7,
+            "unidentified": 9,
+            "investigation": 8,
+            "police": 4,
+            "theory": 5,
+            "theories": 6,
+            "witness": 7,
+            "dna": 7,
+            "genetic genealogy": 8,
+            "inheritance dispute": 8,
+            "no evidence": 6,
+            "no arrests": 7,
+            "no suspect": 7,
+        },
+        16,
+        elementos,
+        "complexidade investigativa",
+    )
 
-    categorias["Ambiente Cinematográfico"] = min(ambiente, 15)
+    categorias["Impacto Humano"] = pontuar_grupo(
+        texto,
+        {
+            "child": 8,
+            "teen": 7,
+            "teenager": 7,
+            "15 year old": 8,
+            "daughter": 5,
+            "son": 5,
+            "mother": 4,
+            "father": 4,
+            "family": 4,
+            "children": 5,
+        },
+        8,
+        elementos,
+        "impacto humano",
+    )
 
-    # 5. Complexidade investigativa
-    investigacao = 0
-    for termo, pontos in {
-        "false trails": 14,
-        "missing files": 14,
-        "foul play": 12,
-        "arrest": 8,
-        "identified": 8,
-        "investigation": 10,
-        "police": 6,
-        "theory": 6,
-        "theories": 8,
-        "inheritance dispute": 10,
-        "unknown": 8
-    }.items():
-        if contem(texto, termo):
-            investigacao += pontos
-            elementos.append(f"{termo} / complexidade investigativa")
+    qualidade = 0
 
-    categorias["Complexidade Investigativa"] = min(investigacao, 18)
+    if resumo_util:
+        tamanho = len(resumo)
 
-    # 6. Impacto humano — pontuação pequena, para não inflar
-    impacto = 0
-    for termo, pontos in {
-        "child": 10,
-        "teen": 8,
-        "teenager": 8,
-        "15 year old": 10,
-        "daughter": 7,
-        "mother": 6,
-        "father": 6,
-        "family": 5
-    }.items():
-        if contem(texto, termo):
-            impacto += pontos
-            elementos.append(f"{termo} / impacto humano")
+        if tamanho >= 900:
+            qualidade += 8
+            elementos.append("resumo longo e apurável / qualidade da fonte")
+        elif tamanho >= 400:
+            qualidade += 5
+            elementos.append("resumo suficiente para triagem / qualidade da fonte")
 
-    categorias["Impacto Humano"] = min(impacto, 10)
+        nomes = re.findall(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", resumo)
+
+        if len(nomes) >= 2:
+            qualidade += 3
+            elementos.append("nomes próprios identificáveis / qualidade da fonte")
+
+        if ano_caso:
+            qualidade += 2
+            elementos.append("ano contextual identificado / qualidade da fonte")
+    else:
+        elementos.append("resumo RSS ausente ou pobre / exige apuração manual")
+
+    categorias["Qualidade da Fonte"] = min(qualidade, 10)
 
     score = sum(categorias.values())
 
-    # Penalidade se o resumo do RSS não trouxer conteúdo real
+    status = detectar_status(titulo, resumo)
+    tipo = detectar_tipo_caso(titulo, resumo, status)
+
     if not resumo_util:
-        score -= 7
-        elementos.append("resumo RSS ausente ou pobre / exige apuração manual")
+        score -= 12
 
-    # Penalidade para título sem nome próprio ou sem especificidade
-    if len(titulo.split()) < 6:
-        score -= 8
-        elementos.append("título curto ou pouco específico / baixa segurança editorial")
-
-    # Caso sem mistério central claro não deve ser supervalorizado
     if categorias["Mistério Central"] < 10:
-        score -= 15
+        score -= 14
         elementos.append("mistério central fraco / risco de pauta genérica")
 
-    score = max(0, min(score, 100))
+    if len(titulo.split()) < 6:
+        score -= 6
+        elementos.append("título curto ou pouco específico / baixa segurança editorial")
 
-    return score, elementos, categorias, resumo_util
+    if status == "RESOLVIDO/ATUALIZAÇÃO":
+        score -= 10
+        elementos.append("caso resolvido ou atualização / menor prioridade para vídeo principal")
+
+    if tipo == "CASO FAMOSO/SATURADO":
+        score -= 8
+        elementos.append("caso famoso ou saturado / exige ângulo novo")
+
+    if status == "RESOLVIDO/ATUALIZAÇÃO":
+        score = min(score, 76)
+
+    if tipo == "CASO FAMOSO/SATURADO":
+        score = min(score, 82)
+
+    if not resumo_util:
+        score = min(score, 70)
+
+    score = max(0, min(int(round(score)), 100))
+
+    return score, elementos, categorias, resumo_util, ano_caso, idade_caso, status, tipo
 
 
-# =========================
-# CLASSIFICAÇÕES
-# =========================
+# =========================================================
+# CLASSIFICAÇÃO EDITORIAL
+# =========================================================
 
 def potencial_documental(score):
     if score >= 88:
         return "Muito Alto"
-    elif score >= 72:
+    if score >= 74:
         return "Alto"
-    elif score >= 52:
+    if score >= 55:
         return "Médio"
     return "Baixo"
 
@@ -302,9 +595,9 @@ def potencial_documental(score):
 def relevancia_sem_rastros(score):
     if score >= 88:
         return "ALTÍSSIMA"
-    elif score >= 72:
+    if score >= 74:
         return "ALTA"
-    elif score >= 52:
+    if score >= 55:
         return "MÉDIA"
     return "BAIXA"
 
@@ -312,45 +605,96 @@ def relevancia_sem_rastros(score):
 def classificacao_caso(score):
     if score >= 88:
         return "CASO PRINCIPAL"
-    elif score >= 72:
+    if score >= 74:
         return "MUITO FORTE"
-    elif score >= 52:
+    if score >= 55:
         return "OBSERVAR"
     return "BAIXO"
 
 
-def decisao_editorial(score, resumo_util):
+def uso_recomendado(score, status, tipo, resumo_util):
+    if tipo == "CASO FAMOSO/SATURADO":
+        if score >= 74:
+            return "Vídeo principal somente com ângulo novo"
+        return "Pesquisa complementar"
+
+    if status == "RESOLVIDO/ATUALIZAÇÃO":
+        if score >= 60:
+            return "Atualização de caso ou short documental"
+        return "Nota curta"
+
     if score >= 88 and resumo_util:
+        return "Vídeo principal"
+
+    if score >= 74:
+        return "Lista curta para roteiro"
+
+    if score >= 55:
+        return "Pesquisa complementar"
+
+    return "Descartar por enquanto"
+
+
+def decisao_editorial(score, status, tipo, resumo_util):
+    uso = uso_recomendado(score, status, tipo, resumo_util)
+
+    if uso == "Vídeo principal":
         return "PRIORIDADE DE ROTEIRO"
-    elif score >= 88 and not resumo_util:
-        return "PRIORIDADE APOS APURACAO"
-    elif score >= 72:
+
+    if uso == "Lista curta para roteiro":
         return "ENTRA NA LISTA CURTA"
-    elif score >= 52:
+
+    if "Atualização" in uso:
+        return "USAR COMO ATUALIZAÇÃO/SHORT"
+
+    if "ângulo novo" in uso:
+        return "APENAS COM GANCHO DIFERENCIADO"
+
+    if uso == "Pesquisa complementar":
         return "GUARDAR PARA PESQUISA"
+
     return "DESCARTAR POR ENQUANTO"
 
 
-def motivo_editorial(categorias, elementos, resumo_util):
+def seguranca_pauta(score, resumo_util, status):
+    if score >= 74 and resumo_util and status != "INDEFINIDO":
+        return "ALTA"
+
+    if score >= 55 and resumo_util:
+        return "MÉDIA"
+
+    return "BAIXA"
+
+
+def motivo_editorial(categorias, resumo_util, status, tipo):
     motivos = []
 
-    if categorias.get("Mistério Central", 0) >= 18:
+    if categorias.get("Mistério Central", 0) >= 16:
         motivos.append("tem mistério central claro")
 
-    if categorias.get("Tempo Sem Solução", 0) >= 12:
-        motivos.append("possui peso histórico ou longa duração sem resposta")
+    if categorias.get("Tempo Sem Solução", 0) >= 9:
+        motivos.append("possui tempo relevante sem resposta")
 
-    if categorias.get("Prova Visual ou Último Registro", 0) >= 12:
-        motivos.append("oferece elemento forte de último registro, imagem, câmera ou pista visual")
+    if categorias.get("Prova Visual ou Último Registro", 0) >= 10:
+        motivos.append("oferece último registro, pista visual ou material concreto de narrativa")
 
-    if categorias.get("Ambiente Cinematográfico", 0) >= 10:
-        motivos.append("possui cenário com potencial visual para documentário")
+    if categorias.get("Ambiente Cinematográfico", 0) >= 8:
+        motivos.append("possui cenário com potencial visual")
 
-    if categorias.get("Complexidade Investigativa", 0) >= 10:
-        motivos.append("tem linhas investigativas, suspeitas ou perguntas abertas")
+    if categorias.get("Complexidade Investigativa", 0) >= 8:
+        motivos.append("tem perguntas investigativas abertas")
 
-    if categorias.get("Impacto Humano", 0) >= 6:
+    if categorias.get("Impacto Humano", 0) >= 5:
         motivos.append("carrega conexão emocional com vítima ou família")
+
+    if categorias.get("Qualidade da Fonte", 0) >= 5:
+        motivos.append("tem resumo útil para triagem inicial")
+
+    if status == "RESOLVIDO/ATUALIZAÇÃO":
+        motivos.append("porém funciona melhor como atualização ou short, não como caso principal")
+
+    if tipo == "CASO FAMOSO/SATURADO":
+        motivos.append("porém exige ângulo novo para não repetir conteúdo já saturado")
 
     if not resumo_util:
         motivos.append("mas exige apuração manual porque o RSS não trouxe resumo confiável")
@@ -361,13 +705,16 @@ def motivo_editorial(categorias, elementos, resumo_util):
     return "Caso com potencial limitado; precisa de pesquisa complementar antes de virar pauta."
 
 
-def gerar_hook(titulo, elementos):
-    texto = f"{titulo} {' '.join(elementos)}".lower()
+def gerar_hook(titulo, elementos, tipo, status):
+    texto = normalizar(f"{titulo} {' '.join(elementos)}")
 
-    if "jane doe" in texto or "john doe" in texto or "unidentified" in texto:
-        return "Por anos, ninguém sabia quem era a vítima — e a identidade pode ser só o começo do mistério."
+    if tipo == "IDENTIDADE DESCONHECIDA":
+        return "Por anos, a vítima não teve nome — e descobrir quem ela era pode ser só o começo do mistério."
 
-    if "cctv" in texto or "camera" in texto or "footage" in texto:
+    if status == "RESOLVIDO/ATUALIZAÇÃO":
+        return "Depois de anos sem resposta, uma nova descoberta mudou completamente a leitura do caso."
+
+    if "cctv" in texto or "security footage" in texto or "footage" in texto:
         return "A última imagem parecia comum, mas se tornou uma das pistas mais inquietantes do caso."
 
     if "vanished" in texto or "without trace" in texto or "no trace" in texto:
@@ -380,157 +727,194 @@ def gerar_hook(titulo, elementos):
         "O caso parecia simples, até os detalhes começarem a não fazer sentido.",
         "A última vez que alguém o viu, tudo parecia normal.",
         "As autoridades tinham pistas, mas nenhuma resposta definitiva.",
-        "O desaparecimento começou como uma ocorrência comum e virou um mistério inquietante."
+        "O desaparecimento começou como uma ocorrência comum e virou um mistério inquietante.",
     ])
 
 
-# =========================
-# COLETA
-# =========================
+# =========================================================
+# COLETA RSS
+# =========================================================
 
-todos_posts = []
+def coletar_posts():
+    posts = []
 
-for url in rss_feeds:
-    try:
-        feed = feedparser.parse(url)
-        for entry in feed.entries:
-            todos_posts.append(entry)
-    except Exception as erro:
-        print(f"Erro ao ler feed {url}: {erro}")
+    for url in RSS_FEEDS:
+        try:
+            feed = feedparser.parse(url, agent=USER_AGENT)
+
+            for entry in getattr(feed, "entries", []):
+                posts.append(entry)
+
+        except Exception as erro:
+            print(f"ERRO AO LER FEED {url}: {erro}")
+
+    return posts
 
 
-# =========================
+# =========================================================
 # PROCESSAMENTO
-# =========================
+# =========================================================
 
-dados = []
-links_vistos = set()
-titulos_vistos = set()
+def processar_posts(posts):
+    dados = []
+    links_vistos = set()
+    titulos_vistos = set()
 
-for entry in todos_posts:
-    titulo = getattr(entry, "title", "").strip()
-    resumo_original = limpar_html(getattr(entry, "summary", ""))
-    link = getattr(entry, "link", "").strip()
+    for entry in posts:
+        titulo = getattr(entry, "title", "").strip()
+        resumo = limpar_html(getattr(entry, "summary", ""))
+        link = getattr(entry, "link", "").strip()
 
-    if not titulo:
-        continue
+        if not titulo:
+            continue
 
-    if titulo_meta_ou_inutil(titulo):
-        continue
+        if titulo_meta_ou_inutil(titulo):
+            continue
 
-    chave_titulo = titulo.lower()
-    chave_link = link.lower()
+        chave_titulo = normalizar(titulo)
+        chave_link = link.lower()
 
-    if chave_link in links_vistos or chave_titulo in titulos_vistos:
-        continue
+        if chave_link and chave_link in links_vistos:
+            continue
 
-    links_vistos.add(chave_link)
-    titulos_vistos.add(chave_titulo)
+        if chave_titulo in titulos_vistos:
+            continue
 
-    score, elementos, categorias, resumo_util = calcular_score_profissional(titulo, resumo_original)
+        if chave_link:
+            links_vistos.add(chave_link)
 
-    # Corte editorial realista
-    if score < 45:
-        continue
+        titulos_vistos.add(chave_titulo)
 
-    if not resumo_util:
-        resumo_exibido = (
-            "Resumo não disponível no RSS. Caso selecionado pelo potencial do título; "
-            "abrir o link para apuração completa antes da produção."
+        score, elementos, categorias, resumo_util, ano_caso, idade_caso, status, tipo = calcular_score_profissional(
+            titulo,
+            resumo
         )
+
+        if score < 50:
+            continue
+
+        if resumo_util:
+            resumo_exibido = resumo[:1800]
+        else:
+            resumo_exibido = (
+                "Resumo não disponível no RSS. Caso selecionado pelo potencial do título; "
+                "abrir o link para apuração completa antes da produção."
+            )
+
+        uso = uso_recomendado(score, status, tipo, resumo_util)
+
+        dados.append({
+            "Caso": titulo,
+            "Resumo Original": resumo_exibido,
+            "Score": score,
+            "Potencial Documental": potencial_documental(score),
+            "Relevância para Sem Rastros": relevancia_sem_rastros(score),
+            "Classificação": classificacao_caso(score),
+            "Tipo de Caso": tipo,
+            "Uso Recomendado": uso,
+            "Decisão Editorial": decisao_editorial(score, status, tipo, resumo_util),
+            "Ano do Caso": ano_caso if ano_caso else "Não identificado",
+            "Idade do Caso": idade_caso if idade_caso is not None else "Não identificada",
+            "Status Detectado": status,
+            "Segurança da Pauta": seguranca_pauta(score, resumo_util, status),
+            "Elementos Detectados": ", ".join(elementos[:20]),
+            "Motivo Editorial": motivo_editorial(categorias, resumo_util, status, tipo),
+            "Hook": gerar_hook(titulo, elementos, tipo, status),
+            "Link": link,
+        })
+
+    return dados
+
+
+# =========================================================
+# SAÍDAS
+# =========================================================
+
+def gerar_dataframe(dados):
+    if dados:
+        df = pd.DataFrame(dados, columns=COLUNAS)
+        df = df.sort_values(by="Score", ascending=False)
     else:
-        resumo_exibido = resumo_original[:1500]
+        df = pd.DataFrame(columns=COLUNAS)
 
-    dados.append({
-        "Caso": titulo,
-        "Resumo Original": resumo_exibido,
-        "Score": score,
-        "Potencial Documental": potencial_documental(score),
-        "Relevância para Sem Rastros": relevancia_sem_rastros(score),
-        "Classificação": classificacao_caso(score),
-        "Decisão Editorial": decisao_editorial(score, resumo_util),
-        "Atmosfera": ", ".join(elementos[:18]),
-        "Motivo Editorial": motivo_editorial(categorias, elementos, resumo_util),
-        "Hook": gerar_hook(titulo, elementos),
-        "Link": link
-    })
+    return df
 
 
-# =========================
-# DATAFRAME E CSV
-# =========================
-
-os.makedirs(PASTA_RESULTADOS, exist_ok=True)
-
-colunas = [
-    "Caso",
-    "Resumo Original",
-    "Score",
-    "Potencial Documental",
-    "Relevância para Sem Rastros",
-    "Classificação",
-    "Decisão Editorial",
-    "Atmosfera",
-    "Motivo Editorial",
-    "Hook",
-    "Link"
-]
-
-if dados:
-    df = pd.DataFrame(dados, columns=colunas)
-    df = df.sort_values(by="Score", ascending=False)
-else:
-    df = pd.DataFrame(columns=colunas)
-
-print(df.head(20))
-
-df.to_csv(CSV_SAIDA, index=False)
-
-print("\nRADAR CINEMATOGRÁFICO PROFISSIONAL FINALIZADO")
-print(f"CSV SALVO EM {CSV_SAIDA}")
+def salvar_csv(df):
+    os.makedirs(PASTA_RESULTADOS, exist_ok=True)
+    df.to_csv(CSV_SAIDA, index=False, encoding="utf-8-sig")
 
 
-# =========================
-# PDF
-# =========================
+def gerar_pdf(df):
+    os.makedirs(PASTA_RESULTADOS, exist_ok=True)
 
-pdf = SimpleDocTemplate(PDF_SAIDA)
-styles = getSampleStyleSheet()
-conteudo = []
+    pdf = SimpleDocTemplate(PDF_SAIDA)
+    styles = getSampleStyleSheet()
+    conteudo = []
 
-titulo_pdf = Paragraph(
-    "<b>RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS</b>",
-    styles["Title"]
-)
+    conteudo.append(
+        Paragraph(
+            "<b>RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS</b>",
+            styles["Title"]
+        )
+    )
 
-conteudo.append(titulo_pdf)
-conteudo.append(Spacer(1, 20))
+    conteudo.append(Spacer(1, 20))
 
-if df.empty:
-    texto = """
-    <b>Nenhum caso válido encontrado nesta execução.</b><br/>
-    O radar rodou corretamente, mas os feeds não retornaram casos acima do corte editorial mínimo.
-    """
-    conteudo.append(Paragraph(texto, styles["BodyText"]))
-else:
-    for index, row in df.head(20).iterrows():
-        texto = f"""
-        <b>Caso:</b> {seguro_pdf(row['Caso'])}<br/>
-        <b>Resumo:</b> {seguro_pdf(row['Resumo Original'])}<br/>
-        <b>Score:</b> {seguro_pdf(row['Score'])}<br/>
-        <b>Potencial:</b> {seguro_pdf(row['Potencial Documental'])}<br/>
-        <b>Relevância Sem Rastros:</b> {seguro_pdf(row['Relevância para Sem Rastros'])}<br/>
-        <b>Classificação:</b> {seguro_pdf(row['Classificação'])}<br/>
-        <b>Decisão Editorial:</b> {seguro_pdf(row['Decisão Editorial'])}<br/>
-        <b>Elementos Detectados:</b> {seguro_pdf(row['Atmosfera'])}<br/>
-        <b>Motivo Editorial:</b> {seguro_pdf(row['Motivo Editorial'])}<br/>
-        <b>Hook:</b> {seguro_pdf(row['Hook'])}<br/>
-        <b>Link:</b> {seguro_pdf(row['Link'])}<br/><br/>
+    if df.empty:
+        texto = """
+        <b>Nenhum caso válido encontrado nesta execução.</b><br/>
+        O radar rodou corretamente, mas os feeds não retornaram casos acima do corte editorial mínimo.
         """
-
         conteudo.append(Paragraph(texto, styles["BodyText"]))
-        conteudo.append(Spacer(1, 20))
+    else:
+        for _, row in df.head(20).iterrows():
+            texto = f"""
+            <b>Caso:</b> {seguro_pdf(row['Caso'])}<br/>
+            <b>Resumo:</b> {seguro_pdf(row['Resumo Original'])}<br/>
+            <b>Score:</b> {seguro_pdf(row['Score'])}<br/>
+            <b>Potencial:</b> {seguro_pdf(row['Potencial Documental'])}<br/>
+            <b>Relevância Sem Rastros:</b> {seguro_pdf(row['Relevância para Sem Rastros'])}<br/>
+            <b>Classificação:</b> {seguro_pdf(row['Classificação'])}<br/>
+            <b>Tipo de Caso:</b> {seguro_pdf(row['Tipo de Caso'])}<br/>
+            <b>Uso Recomendado:</b> {seguro_pdf(row['Uso Recomendado'])}<br/>
+            <b>Decisão Editorial:</b> {seguro_pdf(row['Decisão Editorial'])}<br/>
+            <b>Ano do Caso:</b> {seguro_pdf(row['Ano do Caso'])}<br/>
+            <b>Idade do Caso:</b> {seguro_pdf(row['Idade do Caso'])}<br/>
+            <b>Status Detectado:</b> {seguro_pdf(row['Status Detectado'])}<br/>
+            <b>Segurança da Pauta:</b> {seguro_pdf(row['Segurança da Pauta'])}<br/>
+            <b>Elementos Detectados:</b> {seguro_pdf(row['Elementos Detectados'])}<br/>
+            <b>Motivo Editorial:</b> {seguro_pdf(row['Motivo Editorial'])}<br/>
+            <b>Hook:</b> {seguro_pdf(row['Hook'])}<br/>
+            <b>Link:</b> {seguro_pdf(row['Link'])}<br/><br/>
+            """
 
-pdf.build(conteudo)
+            conteudo.append(Paragraph(texto, styles["BodyText"]))
+            conteudo.append(Spacer(1, 18))
 
-print(f"PDF SALVO EM {PDF_SAIDA}")
+    pdf.build(conteudo)
+
+
+# =========================================================
+# EXECUÇÃO
+# =========================================================
+
+def main():
+    posts = coletar_posts()
+    dados = processar_posts(posts)
+    df = gerar_dataframe(dados)
+
+    print(df.head(20))
+
+    salvar_csv(df)
+    gerar_pdf(df)
+
+    print("\nRADAR CINEMATOGRÁFICO PROFISSIONAL FINALIZADO")
+    print(f"TOTAL DE POSTS COLETADOS: {len(posts)}")
+    print(f"TOTAL DE CASOS APROVADOS: {len(df)}")
+    print(f"CSV SALVO EM: {CSV_SAIDA}")
+    print(f"PDF SALVO EM: {PDF_SAIDA}")
+
+
+if __name__ == "__main__":
+    main()
