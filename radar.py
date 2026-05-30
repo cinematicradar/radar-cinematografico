@@ -101,13 +101,26 @@ for entry in todos_posts:
 
         dados.append({
 
-            "Caso": entry.title,
-            "Score": score,
-            "Classificação": nivel,
-            "Atmosfera": ", ".join(elementos_detectados),
-            "Hook": hook,
-            "Link": entry.link
-        })
+    "Caso": entry.title,
+
+    "Resumo Original": getattr(entry, "summary", "")[:1500],
+
+    "Score": score,
+
+    "Potencial Documental":
+        "Muito Alto" if score >= 80 else
+        "Alto" if score >= 60 else
+        "Médio" if score >= 40 else
+        "Baixo",
+
+    "Classificação": nivel,
+
+    "Atmosfera": ", ".join(elementos_detectados),
+
+    "Hook": hook,
+
+    "Link": entry.link
+})
 
 df = pd.DataFrame(dados)
 
