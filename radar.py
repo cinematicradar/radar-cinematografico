@@ -6,82 +6,51 @@ import random
 import re
 import os
 
+# =========================
+# FUNÇÕES AUXILIARES
+# =========================
 
 def limpar_html(texto):
     texto = re.sub(r'<[^>]+>', '', str(texto))
     texto = texto.replace("&amp;", "&")
     texto = texto.replace("&#39;", "'")
     texto = texto.replace("&quot;", '"')
-    texto = texto.replace("&lt;", "<")
-    texto = texto.replace("&gt;", ">")
     return texto.strip()
 
-
-def texto_inutil(resumo):
+def post_vazio(resumo):
     resumo = str(resumo).lower().strip()
-
-    if not resumo:
-        return True
-
     termos_lixo = ["submitted by", "[link]", "[comments]"]
-
+    if not resumo or len(resumo) < 40:
+        return True
     return all(termo in resumo for termo in termos_lixo)
 
-
-def score_cinematografico_v2(titulo, resumo):
+def calcular_score(titulo, resumo):
     texto = f"{titulo} {resumo}".lower()
-    score = 0
-    elementos = []
 
-    regras = {
-        "missing": 20,
-        "disappearance": 20,
-        "disappeared": 20,
-        "vanished": 25,
-        "without trace": 30,
-        "unsolved": 25,
-        "cold case": 25,
-        "last seen": 25,
-        "never found": 25,
-        "still missing": 25,
-        "cctv": 20,
-        "camera": 15,
-        "surveillance": 20,
-        "forest": 15,
-        "woods": 15,
-        "park": 15,
-        "national park": 25,
-        "mountain": 15,
-        "highway": 15,
-        "road": 10,
-        "night": 10,
-        "phone call": 15,
-        "strange": 15,
-        "disturbing": 15,
-        "creepy": 15,
-        "mysterious": 15,
-        "theory": 10,
-        "theories": 15,
-        "child": 25,
-        "teen": 15,
-        "teenager": 15,
-        "girl": 10,
-        "boy": 10,
-        "woman": 10,
-        "man": 10,
-        "family": 10,
-        "police": 10,
-        "investigation": 15,
-        "case": 10
+    # Categorias ponderadas
+    categorias = {
+        "mistério central": {"missing": 20, "disappearance": 20, "vanished": 25, "without trace": 25, "unsolved": 20, "cold case": 20},
+        "impacto humano": {"child": 25, "teen": 15, "teenager": 15, "woman": 15, "man": 10, "family": 15},
+        "ambiente cinematográfico": {"forest": 15, "woods": 15, "park": 15, "national park": 20, "mountain": 15, "night": 10},
+        "prova visual": {"cctv": 20, "camera": 15, "surveillance": 20},
+        "tempo sem solução": {"last seen": 20, "never found": 20, "still missing": 20}
     }
 
-    for termo, pontos in regras.items():
-        if termo in texto:
-            score += pontos
-            elementos.append(termo)
+    score_total = 0
+    elementos_detectados = []
 
-    return min(score, 100), elementos
+    for categoria, termos in categorias.items():
+        score_cat = 0
+        for termo, pontos in termos.items():
+            if termo in texto:
+                score_cat += pontos
+                elementos_detectados.append(f"{termo} ({categoria})")
+        # Limitar score de cada categoria para não inflar demais
+        score_total += min(score_cat, 30)
 
+    # Normaliza o score para 0-100
+    score_total = min(score_total, 100)
+    return score_total, elementos_detectados
 
 def potencial_documental(score):
     if score >= 80:
@@ -92,7 +61,6 @@ def potencial_documental(score):
         return "Médio"
     return "Baixo"
 
-
 def relevancia_sem_rastros(score):
     if score >= 80:
         return "ALTÍSSIMA"
@@ -101,7 +69,6 @@ def relevancia_sem_rastros(score):
     elif score >= 35:
         return "MÉDIA"
     return "BAIXA"
-
 
 def classificacao_caso(score):
     if score >= 80:
@@ -112,16 +79,18 @@ def classificacao_caso(score):
         return "🟡 OBSERVAR"
     return "⚪ BAIXO"
 
-
 def motivo_editorial(score, elementos):
     if score >= 80:
-        return "Caso com forte potencial documental, atmosfera de mistério e elementos narrativos relevantes para vídeo longo."
+        return "Caso com forte potencial documental, atmosfera de mistério e narrativa cinematográfica completa."
     elif score >= 60:
-        return "Caso promissor para investigação, com bons elementos para construção de roteiro."
+        return "Caso relevante para roteiro investigativo, com bons elementos narrativos."
     elif score >= 35:
-        return "Caso deve ser observado. Pode render pauta se houver fontes complementares."
-    return "Caso fraco no momento, exige mais apuração antes de virar roteiro."
+        return "Caso interessante, precisa de apuração adicional para gerar conteúdo de qualidade."
+    return "Caso pouco relevante, deve ser usado apenas como referência."
 
+# =========================
+# FEEDS E CONFIGURAÇÕES
+# =========================
 
 rss_feeds = [
     "https://www.reddit.com/r/UnresolvedMysteries/.rss",
@@ -130,37 +99,37 @@ rss_feeds = [
     "https://www.reddit.com/r/UnsolvedMysteries/.rss"
 ]
 
-
 todos_posts = []
 
 for url in rss_feeds:
     feed = feedparser.parse(url)
-
     for entry in feed.entries:
         todos_posts.append(entry)
 
+# =========================
+# PROCESSAMENTO DOS POSTS
+# =========================
 
 dados = []
 
 for entry in todos_posts:
-    titulo_original = getattr(entry, "title", "")
+    titulo = getattr(entry, "title", "")
     resumo_original = limpar_html(getattr(entry, "summary", ""))
     link = getattr(entry, "link", "")
 
-    if not titulo_original:
+    if not titulo:
+        continue
+    if post_vazio(resumo_original):
         continue
 
-    score, elementos_detectados = score_cinematografico_v2(titulo_original, resumo_original)
+    score, elementos_detectados = calcular_score(titulo, resumo_original)
 
-    # Não descarta automaticamente resumo ruim se o título for forte
-    if texto_inutil(resumo_original) and score < 35:
-        continue
-
-    # Só descarta se realmente não tiver nenhum sinal editorial
+    # Se score baixo, ignora
     if score < 20:
         continue
 
-    if not resumo_original or texto_inutil(resumo_original):
+    # Preenchimento automático de resumo se vazio
+    if not resumo_original:
         resumo_original = "Resumo não disponível no RSS. Avaliar o caso pelo título e abrir o link para apuração completa."
 
     hook = random.choice([
@@ -172,7 +141,7 @@ for entry in todos_posts:
     ])
 
     dados.append({
-        "Caso": titulo_original,
+        "Caso": titulo,
         "Resumo Original": resumo_original[:1500],
         "Score": score,
         "Potencial Documental": potencial_documental(score),
@@ -184,57 +153,40 @@ for entry in todos_posts:
         "Link": link
     })
 
+# =========================
+# SALVAR CSV
+# =========================
 
 os.makedirs("resultados", exist_ok=True)
 
 colunas = [
-    "Caso",
-    "Resumo Original",
-    "Score",
-    "Potencial Documental",
-    "Relevância para Sem Rastros",
-    "Classificação",
-    "Atmosfera",
-    "Motivo Editorial",
-    "Hook",
-    "Link"
+    "Caso", "Resumo Original", "Score", "Potencial Documental",
+    "Relevância para Sem Rastros", "Classificação", "Atmosfera",
+    "Motivo Editorial", "Hook", "Link"
 ]
 
-if not dados:
-    df = pd.DataFrame(columns=colunas)
-    print("⚠️ Nenhum caso encontrado. O radar rodou, mas os feeds não trouxeram material suficiente.")
-else:
-    df = pd.DataFrame(dados, columns=colunas)
-    df = df.sort_values(by="Score", ascending=False)
-
-print(df.head(20))
-
+df = pd.DataFrame(dados, columns=colunas)
+df = df.sort_values(by="Score", ascending=False)
 df.to_csv("resultados/casos_cinematicos.csv", index=False)
+print("✅ CSV gerado em resultados/casos_cinematicos.csv")
 
-print("\n✅ RADAR CINEMATOGRÁFICO FINALIZADO")
-print("✅ CSV SALVO EM resultados/casos_cinematicos.csv")
-
+# =========================
+# GERAR PDF DOCUMENTAL
+# =========================
 
 pdf = SimpleDocTemplate("resultados/dossie_cinematografico.pdf")
 styles = getSampleStyleSheet()
 conteudo = []
 
-titulo_pdf = Paragraph(
-    "<b>RADAR CINEMATOGRÁFICO DE DESAPARECIMENTOS</b>",
-    styles["Title"]
-)
-
+titulo_pdf = Paragraph("<b>RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS</b>", styles["Title"])
 conteudo.append(titulo_pdf)
 conteudo.append(Spacer(1, 20))
 
 if df.empty:
-    texto = """
-    <b>Nenhum caso válido encontrado nesta execução.</b><br/>
-    O radar rodou corretamente, mas os feeds não retornaram casos com pontuação mínima.
-    """
+    texto = "<b>Nenhum caso válido encontrado nesta execução.</b>"
     conteudo.append(Paragraph(texto, styles["BodyText"]))
 else:
-    for index, row in df.head(15).iterrows():
+    for index, row in df.head(20).iterrows():
         texto = f"""
         <b>Caso:</b> {row['Caso']}<br/>
         <b>Resumo:</b> {row['Resumo Original']}<br/>
@@ -247,10 +199,8 @@ else:
         <b>Hook:</b> {row['Hook']}<br/>
         <b>Link:</b> {row['Link']}<br/><br/>
         """
-
         conteudo.append(Paragraph(texto, styles["BodyText"]))
         conteudo.append(Spacer(1, 20))
 
 pdf.build(conteudo)
-
-print("✅ PDF SALVO EM resultados/dossie_cinematografico.pdf")
+print("✅ PDF gerado em resultados/dossie_cinematografico.pdf")
