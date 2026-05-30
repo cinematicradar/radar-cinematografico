@@ -10,7 +10,7 @@ from datetime import datetime
 
 
 # =========================================================
-# RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS - V4.1
+# RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS - V4.2
 # =========================================================
 
 ANO_ATUAL = datetime.now().year
@@ -26,7 +26,7 @@ RSS_FEEDS = [
     "https://www.reddit.com/r/UnsolvedMysteries/.rss",
 ]
 
-USER_AGENT = "SemRastrosRadar/4.1"
+USER_AGENT = "SemRastrosRadar/4.2"
 
 COLUNAS = [
     "Caso",
@@ -134,16 +134,87 @@ def titulo_meta_ou_inutil(titulo):
 # =========================================================
 
 def extrair_ano_contextual(titulo, resumo):
-    texto_total = limpar_html(f"{titulo}. {resumo}")
-    texto = texto_total.lower()
+    """
+    Extrai o ano mais provável do evento principal do caso.
 
-    termos_exclusao = [
+    Regra profissional:
+    1. Se o título contém ano e termos de caso, o ano do título tem prioridade.
+    2. Depois, procura expressões diretamente ligadas ao evento:
+       missing since, went missing, last seen, found dead, murdered, body found etc.
+    3. Ignora anos de nascimento, NamUs, podcast, reportagem, documentário,
+       "current age", "added in", eventos secundários e referências históricas.
+    """
+    titulo_norm = normalizar(titulo)
+    texto_total = limpar_html(f"{titulo}. {resumo}")
+    texto = normalizar(texto_total)
+
+    termos_de_caso_no_titulo = [
+        "missing",
+        "disappeared",
+        "vanished",
+        "vanishes",
+        "murder",
+        "murdered",
+        "homicide",
+        "found dead",
+        "body found",
+        "remains",
+        "jane doe",
+        "john doe",
+        "since",
+        "last seen",
+        "last contacted",
+        "what happened",
+        "who was",
+        "who is",
+    ]
+
+    anos_titulo = [
+        int(a) for a in re.findall(r"\b(19\d{2}|20[0-2]\d)\b", titulo_norm)
+    ]
+
+    # Quando o título já descreve o evento, ele costuma ser mais confiável que o resumo.
+    if anos_titulo and any(t in titulo_norm for t in termos_de_caso_no_titulo):
+        ano = min(anos_titulo)
+        return ano, ANO_ATUAL - ano
+
+    meses = (
+        "january|february|march|april|may|june|july|august|"
+        "september|october|november|december|jan|feb|mar|apr|jun|jul|aug|"
+        "sep|sept|oct|nov|dec"
+    )
+
+    padroes_fortes = [
+        rf"(?:missing since|went missing|reported missing|listed as missing|has been missing|"
+        rf"last seen|last contacted|last confirmed contact|disappeared|vanished|vanishes)"
+        rf"[^.?!]{{0,100}}\b(19\d{{2}}|20[0-2]\d)\b",
+
+        rf"\b(19\d{{2}}|20[0-2]\d)\b[^.?!]{{0,100}}"
+        rf"(?:went missing|reported missing|listed as missing|has been missing|last seen|"
+        rf"last contacted|last confirmed contact|disappeared|vanished|vanishes)",
+
+        rf"(?:found dead|body was found|body found|remains were found|remains found|"
+        rf"was murdered|murdered|killed|homicide|death occurred)"
+        rf"[^.?!]{{0,100}}\b(19\d{{2}}|20[0-2]\d)\b",
+
+        rf"\b(19\d{{2}}|20[0-2]\d)\b[^.?!]{{0,100}}"
+        rf"(?:found dead|body was found|body found|remains were found|remains found|"
+        rf"was murdered|murdered|killed|homicide)",
+
+        rf"(?:on|in|since|from|around)\s+"
+        rf"(?:(?:{meses})\s+)?"
+        rf"(?:\d{{1,2}}(?:st|nd|rd|th)?(?:,)?\s+)?"
+        rf"\b(19\d{{2}}|20[0-2]\d)\b",
+    ]
+
+    termos_exclusao_janela = [
         "born",
+        "was born",
         "dob",
         "date of birth",
         "current age",
         "age at disappearance",
-        "was born",
+        "age at the time",
         "released in",
         "episode",
         "podcast",
@@ -154,84 +225,104 @@ def extrair_ano_contextual(titulo, resumo):
         "report from",
         "reports from",
         "as of",
-    ]
-
-    padroes = [
-        r"(?:missing since|went missing|reported missing|last seen|last contacted|disappeared|vanished)\D{0,80}\b(19\d{2}|20[0-2]\d)\b",
-        r"(?:found dead|body was found|body found|remains were found|remains found|murdered|killed|homicide)\D{0,80}\b(19\d{2}|20[0-2]\d)\b",
-        r"\b(19\d{2}|20[0-2]\d)\b\D{0,80}(?:missing|disappeared|vanished|found dead|body was found|remains|murdered|killed|last seen)",
+        "posted",
+        "submitted",
+        "added in",
+        "grammys",
+        "attendance",
+        "school to study",
+        "graduated",
+        "formed in",
+        "sentenced in",
     ]
 
     candidatos = []
 
-    for prioridade, padrao in enumerate(padroes):
+    for prioridade, padrao in enumerate(padroes_fortes):
         for match in re.finditer(padrao, texto, flags=re.IGNORECASE):
             ano = int(match.group(1))
 
-            inicio = max(0, match.start() - 90)
-            fim = min(len(texto), match.end() + 90)
+            inicio = max(0, match.start() - 100)
+            fim = min(len(texto), match.end() + 100)
             janela = texto[inicio:fim]
 
-            if any(ex in janela for ex in termos_exclusao):
+            if any(ex in janela for ex in termos_exclusao_janela):
                 continue
 
             if 1900 <= ano <= ANO_ATUAL:
                 candidatos.append((prioridade, ano))
 
     if candidatos:
-        candidatos.sort(key=lambda item: (item[0], -item[1]))
+        # Prioridade menor é melhor; dentro da mesma prioridade, ano mais antigo tende a ser o evento.
+        candidatos.sort(key=lambda item: (item[0], item[1]))
         ano = candidatos[0][1]
         return ano, ANO_ATUAL - ano
 
-    titulo_norm = normalizar(titulo)
-
-    if any(t in titulo_norm for t in [
-        "missing",
-        "disappeared",
-        "vanished",
-        "murder",
-        "jane doe",
-        "john doe",
-        "found dead",
-        "remains"
-    ]):
-        anos_titulo = [
-            int(a) for a in re.findall(r"\b(19\d{2}|20[0-2]\d)\b", titulo_norm)
-        ]
-
-        anos_validos = [a for a in anos_titulo if 1900 <= a <= ANO_ATUAL]
-
-        if anos_validos:
-            ano = max(anos_validos)
-            return ano, ANO_ATUAL - ano
-
     return None, None
-
 
 # =========================================================
 # STATUS E TIPO DE CASO
 # =========================================================
 
 def detectar_status(titulo, resumo):
+    """
+    Classifica status com cautela.
+    Não marca como resolvido só porque o texto menciona 'identified',
+    'recovered' ou 'arrest' em contexto secundário.
+    """
+    titulo_norm = normalizar(titulo)
     texto = normalizar(f"{titulo} {resumo}")
 
-    resolvido = any(contem(texto, termo) for termo in [
+    termos_resolvido_titulo = [
         "killer identified",
         "has been identified",
-        "identified the killer",
         "has been named",
+        "arrest",
         "arrested",
         "case solved",
         "solved",
-        "recovered the remains",
         "remains have been recovered",
         "body has been recovered",
+        "recovered in",
+        "recovered from",
+    ]
+
+    if any(t in titulo_norm for t in termos_resolvido_titulo):
+        return "RESOLVIDO/ATUALIZAÇÃO"
+
+    termos_resolvido_resumo = [
+        "officially arrested",
+        "has been arrested",
+        "was arrested",
+        "has been named",
+        "identified the killer",
+        "killer has been identified",
+        "case was solved",
+        "case has been solved",
         "dna match",
         "genetic genealogy breakthrough",
-    ])
+        "recovered the remains",
+        "confirmed her identity",
+        "confirmed his identity",
+        "provided investigators a location",
+    ]
 
-    aberto = any(contem(texto, termo) for termo in [
+    if any(t in texto for t in termos_resolvido_resumo):
+        return "RESOLVIDO/ATUALIZAÇÃO"
+
+    termos_aberto = [
         "still missing",
+        "has been missing",
+        "been missing",
+        "listed as missing",
+        "listed as a missing person",
+        "is listed as a missing person",
+        "missing from",
+        "missing since",
+        "never came home",
+        "still has no name",
+        "has no name",
+        "no name",
         "never found",
         "no trace",
         "case is still open",
@@ -240,28 +331,20 @@ def detectar_status(titulo, resumo):
         "what happened to",
         "who was",
         "who is",
-    ])
+        "no arrests",
+        "no suspect",
+        "no confirmed sightings",
+        "no one has been charged",
+        "remains unsolved",
+        "not been solved",
+        "no closer to finding",
+        "never seen again",
+    ]
 
-    atualizacao = any(contem(texto, termo) for termo in [
-        "update",
-        "arrest",
-        "identified",
-        "named",
-        "recovered",
-        "breakthrough",
-    ])
-
-    if resolvido:
-        return "RESOLVIDO/ATUALIZAÇÃO"
-
-    if aberto:
+    if any(t in texto for t in termos_aberto):
         return "ABERTO"
 
-    if atualizacao:
-        return "ATUALIZAÇÃO"
-
     return "INDEFINIDO"
-
 
 def caso_famoso_ou_saturado(titulo):
     titulo = normalizar(titulo)
@@ -290,35 +373,52 @@ def detectar_tipo_caso(titulo, resumo, status):
     if status == "RESOLVIDO/ATUALIZAÇÃO":
         return "CASO RESOLVIDO/ATUALIZAÇÃO"
 
-    if any(contem(texto, termo) for termo in [
+    if any(t in texto for t in [
         "jane doe",
         "john doe",
         "unidentified body",
         "unidentified remains",
         "unidentified victim",
+        "still has no name",
+        "has no name",
+        "no name",
     ]):
         return "IDENTIDADE DESCONHECIDA"
 
-    if any(contem(texto, termo) for termo in [
-        "missing",
+    if any(t in texto for t in [
+        "still missing",
+        "has been missing",
+        "been missing",
+        "listed as missing",
+        "listed as a missing person",
+        "is listed as a missing person",
+        "missing from",
+        "missing since",
+        "missing person",
+        "went missing",
+        "reported missing",
         "disappeared",
         "vanished",
-        "still missing",
         "never found",
+        "no trace",
+        "never seen again",
     ]):
         return "DESAPARECIMENTO ABERTO"
 
-    if any(contem(texto, termo) for termo in [
+    if any(t in texto for t in [
         "murder",
         "murdered",
         "homicide",
         "found dead",
         "body found",
+        "shot to death",
+        "stabbed",
+        "killed",
+        "death was listed as undetermined",
     ]):
         return "HOMICÍDIO/MORTE SUSPEITA"
 
     return "CASO DE APOIO/PESQUISA"
-
 
 # =========================================================
 # SCORE PROFISSIONAL
@@ -362,6 +462,7 @@ def calcular_score_profissional(titulo, resumo):
             "disappearance": 16,
             "disappeared": 16,
             "vanished": 20,
+            "vanishes": 18,
             "without trace": 22,
             "no trace": 20,
             "never found": 20,
@@ -644,8 +745,11 @@ def decisao_editorial(score, status, tipo, resumo_util):
     if uso == "Lista curta para roteiro":
         return "ENTRA NA LISTA CURTA"
 
-    if "Atualização" in uso:
+    if uso == "Atualização de caso ou short documental":
         return "USAR COMO ATUALIZAÇÃO/SHORT"
+
+    if uso == "Nota curta":
+        return "USAR COMO NOTA CURTA"
 
     if "ângulo novo" in uso:
         return "APENAS COM GANCHO DIFERENCIADO"
@@ -654,7 +758,6 @@ def decisao_editorial(score, status, tipo, resumo_util):
         return "GUARDAR PARA PESQUISA"
 
     return "DESCARTAR POR ENQUANTO"
-
 
 def seguranca_pauta(score, resumo_util, status):
     if score >= 74 and resumo_util and status != "INDEFINIDO":
