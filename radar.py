@@ -10,6 +10,19 @@ def limpar_html(texto):
     texto = texto.replace("&#39;", "'")
     texto = texto.replace("&quot;", '"')
     return texto.strip()
+    def post_vazio(resumo):
+    resumo = str(resumo).lower().strip()
+
+    termos_lixo = [
+        "submitted by",
+        "[link]",
+        "[comments]"
+    ]
+
+    if not resumo or len(resumo) < 80:
+        return True
+
+    return all(termo in resumo for termo in termos_lixo)
 
 rss_feeds = [
 
