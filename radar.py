@@ -160,12 +160,14 @@ for index, row in df.head(15).iterrows():
 
     texto = f"""
     <b>Caso:</b> {row['Caso']}<br/>
+    <b>Resumo:</b> {row['Resumo Original']}<br/>
+    <b>Potencial:</b> {row['Potencial Documental']}<br/>
     <b>Score:</b> {row['Score']}<br/>
     <b>Classificação:</b> {row['Classificação']}<br/>
     <b>Atmosfera:</b> {row['Atmosfera']}<br/>
     <b>Hook:</b> {row['Hook']}<br/>
     <b>Link:</b> {row['Link']}<br/><br/>
-    """
+"""
 
     paragrafo = Paragraph(texto, styles['BodyText'])
 
