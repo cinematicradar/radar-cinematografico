@@ -10,7 +10,7 @@ from datetime import datetime
 
 
 # =========================================================
-# RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS - V5.0
+# RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS - V4.2
 # =========================================================
 
 ANO_ATUAL = datetime.now().year
@@ -18,8 +18,6 @@ ANO_ATUAL = datetime.now().year
 PASTA_RESULTADOS = "resultados"
 CSV_SAIDA = os.path.join(PASTA_RESULTADOS, "casos_cinematicos.csv")
 PDF_SAIDA = os.path.join(PASTA_RESULTADOS, "dossie_cinematografico.pdf")
-BRIEFING_MD_SAIDA = os.path.join(PASTA_RESULTADOS, "briefings_sem_rastros.md")
-BRIEFING_PDF_SAIDA = os.path.join(PASTA_RESULTADOS, "briefings_sem_rastros.pdf")
 
 RSS_FEEDS = [
     "https://www.reddit.com/r/UnresolvedMysteries/.rss",
@@ -28,7 +26,7 @@ RSS_FEEDS = [
     "https://www.reddit.com/r/UnsolvedMysteries/.rss",
 ]
 
-USER_AGENT = "SemRastrosRadar/5.0"
+USER_AGENT = "SemRastrosRadar/4.2"
 
 COLUNAS = [
     "Caso",
@@ -129,60 +127,6 @@ def titulo_meta_ou_inutil(titulo):
     ]
 
     return any(b in titulo for b in bloqueios)
-
-
-def fora_escopo_sem_rastros(titulo, resumo, link=""):
-    """
-    Remove posts de true crime comum que até podem ser interessantes,
-    mas não são bons para o posicionamento do Sem Rastros: desaparecimentos,
-    identidades desconhecidas, mistérios abertos e investigações documentais.
-    """
-    texto = normalizar(f"{titulo} {resumo}")
-    titulo_norm = normalizar(titulo)
-    link_norm = normalizar(link)
-
-    nucleo_sem_rastros = [
-        "missing",
-        "disappeared",
-        "vanished",
-        "still missing",
-        "never found",
-        "no trace",
-        "unsolved",
-        "cold case",
-        "jane doe",
-        "john doe",
-        "unidentified",
-        "who was",
-        "who is",
-        "what happened",
-        "found dead",
-        "body found",
-        "remains",
-    ]
-
-    tem_nucleo = any(t in texto for t in nucleo_sem_rastros)
-
-    # Condenações/crimes comuns com autor conhecido costumam gerar pauta fraca
-    # para o canal, salvo quando há mistério, identidade desconhecida ou caso aberto.
-    truecrime_comum = [
-        "sentenced to death",
-        "death row",
-        "serial rapist",
-        "fatally shot a police officer",
-        "patrolman",
-        "was indicted",
-        "parole violation",
-    ]
-
-    if any(t in texto for t in truecrime_comum) and not tem_nucleo:
-        return True
-
-    # Filtro extra para r/TrueCrime: evita casos apenas criminais/condenatórios.
-    if "r/truecrime" in link_norm and any(t in titulo_norm for t in truecrime_comum):
-        return True
-
-    return False
 
 
 # =========================================================
@@ -322,81 +266,31 @@ def extrair_ano_contextual(titulo, resumo):
 
 def detectar_status(titulo, resumo):
     """
-    Classifica o status do caso com prioridade editorial.
-
-    Regras principais:
-    - Título claramente resolvido/atualização vence.
-    - Sinais fortes de caso aberto no título/resumo vencem menções secundárias.
-    - Termos como "identified", "recovered" e "DNA" no corpo só viram atualização
-      quando aparecem ligados a solução real, prisão, identificação formal ou recuperação de restos.
+    Classifica status com cautela.
+    Não marca como resolvido só porque o texto menciona 'identified',
+    'recovered' ou 'arrest' em contexto secundário.
     """
     titulo_norm = normalizar(titulo)
     texto = normalizar(f"{titulo} {resumo}")
 
-    resolvido_no_titulo = [
-        "[arrest]",
-        "arrest after",
+    termos_resolvido_titulo = [
         "killer identified",
         "has been identified",
         "has been named",
+        "arrest",
         "arrested",
         "case solved",
         "solved",
         "remains have been recovered",
         "body has been recovered",
-        "have been recovered",
         "recovered in",
         "recovered from",
     ]
 
-    if any(t in titulo_norm for t in resolvido_no_titulo):
+    if any(t in titulo_norm for t in termos_resolvido_titulo):
         return "RESOLVIDO/ATUALIZAÇÃO"
 
-    aberto_forte = [
-        "still missing",
-        "has been missing",
-        "been missing",
-        "listed as missing",
-        "listed as a missing person",
-        "is listed as a missing person",
-        "missing from",
-        "missing since",
-        "went missing",
-        "reported missing",
-        "never came home",
-        "never found",
-        "never seen again",
-        "never seen him again",
-        "never seen her again",
-        "loved ones have never seen",
-        "no trace",
-        "no confirmed sightings",
-        "case is still open",
-        "remains unsolved",
-        "unresolved",
-        "not been solved",
-        "unsolved",
-        "no arrests",
-        "no arrest",
-        "no one has been arrested",
-        "no one has been charged",
-        "no suspect",
-        "no known suspect",
-        "nobody officially knows",
-        "no definitive answer",
-        "no definitive answers",
-        "no closer to finding",
-        "where is",
-        "what happened to",
-        "what became of",
-        "who was",
-        "who is",
-    ]
-
-    if any(t in texto for t in aberto_forte):
-        return "ABERTO"
-
-    resolvido_no_resumo = [
+    termos_resolvido_resumo = [
         "officially arrested",
         "has been arrested",
         "was arrested",
@@ -405,6 +299,7 @@ def detectar_status(titulo, resumo):
         "killer has been identified",
         "case was solved",
         "case has been solved",
+        "dna match",
         "genetic genealogy breakthrough",
         "recovered the remains",
         "confirmed her identity",
@@ -412,8 +307,42 @@ def detectar_status(titulo, resumo):
         "provided investigators a location",
     ]
 
-    if any(t in texto for t in resolvido_no_resumo):
+    if any(t in texto for t in termos_resolvido_resumo):
         return "RESOLVIDO/ATUALIZAÇÃO"
+
+    termos_aberto = [
+        "still missing",
+        "has been missing",
+        "been missing",
+        "listed as missing",
+        "listed as a missing person",
+        "is listed as a missing person",
+        "missing from",
+        "missing since",
+        "never came home",
+        "still has no name",
+        "has no name",
+        "no name",
+        "never found",
+        "no trace",
+        "case is still open",
+        "unsolved",
+        "where is",
+        "what happened to",
+        "who was",
+        "who is",
+        "no arrests",
+        "no suspect",
+        "no confirmed sightings",
+        "no one has been charged",
+        "remains unsolved",
+        "not been solved",
+        "no closer to finding",
+        "never seen again",
+    ]
+
+    if any(t in texto for t in termos_aberto):
+        return "ABERTO"
 
     return "INDEFINIDO"
 
@@ -437,12 +366,13 @@ def caso_famoso_ou_saturado(titulo):
 
 def detectar_tipo_caso(titulo, resumo, status):
     texto = normalizar(f"{titulo} {resumo}")
-    titulo_norm = normalizar(titulo)
 
     if caso_famoso_ou_saturado(titulo):
         return "CASO FAMOSO/SATURADO"
 
-    # Identidade desconhecida é um eixo próprio, mesmo quando há homicídio.
+    if status == "RESOLVIDO/ATUALIZAÇÃO":
+        return "CASO RESOLVIDO/ATUALIZAÇÃO"
+
     if any(t in texto for t in [
         "jane doe",
         "john doe",
@@ -454,58 +384,6 @@ def detectar_tipo_caso(titulo, resumo, status):
         "no name",
     ]):
         return "IDENTIDADE DESCONHECIDA"
-
-    if status == "RESOLVIDO/ATUALIZAÇÃO":
-        return "CASO RESOLVIDO/ATUALIZAÇÃO"
-
-    # Quando o núcleo do título é homicídio/morte suspeita, não deixar menções genéricas
-    # a "missing cases" no resumo transformarem tudo em desaparecimento.
-    homicidio_no_titulo = any(t in titulo_norm for t in [
-        "murder",
-        "murdered",
-        "homicide",
-        "found dead",
-        "body found",
-        "shot to death",
-        "stabbed",
-        "killed",
-        "drownings",
-        "deaths",
-    ])
-
-    desaparecimento_no_titulo = any(t in titulo_norm for t in [
-        "missing",
-        "went missing",
-        "reported missing",
-        "disappeared",
-        "vanished",
-        "never found",
-        "no trace",
-        "what happened to",
-        "what became of",
-    ])
-
-    if desaparecimento_no_titulo and not homicidio_no_titulo:
-        return "DESAPARECIMENTO ABERTO"
-
-    if homicidio_no_titulo:
-        return "HOMICÍDIO/MORTE SUSPEITA"
-
-    if any(t in texto for t in [
-        "unsolved homicide",
-        "cold homicide",
-        "murder",
-        "murdered",
-        "homicide",
-        "found dead",
-        "body found",
-        "shot to death",
-        "stabbed",
-        "killed",
-        "death was listed as undetermined",
-        "suspicious death",
-    ]):
-        return "HOMICÍDIO/MORTE SUSPEITA"
 
     if any(t in texto for t in [
         "still missing",
@@ -524,9 +402,21 @@ def detectar_tipo_caso(titulo, resumo, status):
         "never found",
         "no trace",
         "never seen again",
-        "what became of",
     ]):
         return "DESAPARECIMENTO ABERTO"
+
+    if any(t in texto for t in [
+        "murder",
+        "murdered",
+        "homicide",
+        "found dead",
+        "body found",
+        "shot to death",
+        "stabbed",
+        "killed",
+        "death was listed as undetermined",
+    ]):
+        return "HOMICÍDIO/MORTE SUSPEITA"
 
     return "CASO DE APOIO/PESQUISA"
 
@@ -944,323 +834,6 @@ def gerar_hook(titulo, elementos, tipo, status):
     ])
 
 
-
-# =========================================================
-# BRIEFING EDITORIAL ESTRATÉGICO
-# =========================================================
-
-def texto_curto(texto, limite=180):
-    texto = limpar_html(texto)
-    if len(texto) <= limite:
-        return texto
-    corte = texto[:limite].rsplit(" ", 1)[0]
-    return corte + "..."
-
-
-def titulo_provisorio(row):
-    caso = str(row.get("Caso", "")).strip()
-    tipo = str(row.get("Tipo de Caso", "")).strip()
-    ano = str(row.get("Ano do Caso", "")).strip()
-
-    if tipo == "IDENTIDADE DESCONHECIDA":
-        return f"Quem era a vítima sem nome? O mistério por trás de {texto_curto(caso, 90)}"
-
-    if tipo == "DESAPARECIMENTO ABERTO":
-        return f"A pessoa desapareceu e as pistas não fecham: {texto_curto(caso, 95)}"
-
-    if tipo == "CASO RESOLVIDO/ATUALIZAÇÃO":
-        return f"A reviravolta depois de anos sem resposta: {texto_curto(caso, 95)}"
-
-    if tipo == "CASO FAMOSO/SATURADO":
-        return f"O detalhe menos discutido de um caso famoso: {texto_curto(caso, 95)}"
-
-    if ano and ano != "Não identificado":
-        return f"O caso de {ano} que ainda deixa perguntas abertas"
-
-    return f"O mistério que ainda precisa de resposta: {texto_curto(caso, 100)}"
-
-
-def angulo_narrativo(row):
-    tipo = str(row.get("Tipo de Caso", ""))
-    status = str(row.get("Status Detectado", ""))
-    elementos = normalizar(row.get("Elementos Detectados", ""))
-
-    if tipo == "IDENTIDADE DESCONHECIDA":
-        return "Identidade apagada: construir a narrativa em torno de quem era a vítima, quais pistas físicas existem e por que o nome dela ainda importa."
-
-    if tipo == "DESAPARECIMENTO ABERTO":
-        return "Última janela conhecida: reconstruir as últimas horas, o último contato, o deslocamento e os pontos cegos da investigação."
-
-    if tipo == "HOMICÍDIO/MORTE SUSPEITA":
-        return "Morte sem resposta clara: focar na cena, nas inconsistências, nos vestígios e nas perguntas que continuam abertas."
-
-    if tipo == "CASO RESOLVIDO/ATUALIZAÇÃO" or status == "RESOLVIDO/ATUALIZAÇÃO":
-        return "Virada investigativa: mostrar como o caso mudou com DNA, identificação, prisão ou recuperação de restos, sem tratar como mistério principal."
-
-    if tipo == "CASO FAMOSO/SATURADO":
-        return "Ângulo novo obrigatório: evitar repetir o resumo conhecido e escolher um detalhe pouco explorado, uma falha de investigação ou uma linha temporal específica."
-
-    if "cctv" in elementos or "footage" in elementos:
-        return "Última imagem: usar o registro visual como ponto de tensão narrativa e voltar no tempo para explicar como o caso chegou ali."
-
-    return "Investigação aberta: organizar o caso como uma sequência de perguntas, pistas e lacunas documentais."
-
-
-def promessa_do_video(row):
-    tipo = str(row.get("Tipo de Caso", ""))
-    score = row.get("Score", "")
-    ano = row.get("Ano do Caso", "Não identificado")
-
-    if tipo == "IDENTIDADE DESCONHECIDA":
-        return f"Mostrar como uma pessoa pode desaparecer até da própria identidade, e por que o caso ainda merece atenção. Score editorial: {score}."
-
-    if tipo == "DESAPARECIMENTO ABERTO":
-        return f"Reconstruir o desaparecimento com foco nas últimas pistas confiáveis e nas perguntas que continuam sem resposta desde {ano}."
-
-    if tipo == "CASO RESOLVIDO/ATUALIZAÇÃO":
-        return "Explicar a atualização de forma compacta, destacando o que mudou, o que foi confirmado e o que ainda permanece nebuloso."
-
-    if tipo == "CASO FAMOSO/SATURADO":
-        return "Entregar valor pelo recorte: não contar tudo de novo, mas encontrar uma pergunta específica que o público ainda não viu bem explicada."
-
-    return "Transformar uma pauta bruta em investigação documental clara, respeitosa e visualmente forte."
-
-
-def estrutura_roteiro(row):
-    hook = str(row.get("Hook", ""))
-    tipo = str(row.get("Tipo de Caso", ""))
-    ano = str(row.get("Ano do Caso", "Não identificado"))
-
-    blocos = [
-        f"1. Abertura fria: {hook}",
-        "2. Identificação do caso: quem é a vítima, onde aconteceu e qual é a pergunta central.",
-        "3. Linha do tempo: últimas horas, último contato, deslocamento e descoberta inicial.",
-        "4. Pistas materiais: objetos, câmera, ligação, veículo, local, testemunhas ou documentos.",
-        "5. Lacunas: o que não fecha, o que foi mal explicado e o que ainda precisa ser comprovado.",
-        "6. Hipóteses com cuidado: apresentar possibilidades sem acusar pessoas sem prova.",
-        "7. Fechamento: estado atual do caso, fontes oficiais e convite para comentário responsável."
-    ]
-
-    if tipo == "IDENTIDADE DESCONHECIDA":
-        blocos[2] = "3. Perfil físico e vestígios: roupas, objetos, local onde foi encontrada e tentativas de identificação."
-        blocos[5] = "6. Hipóteses de identidade: comparar pistas sem transformar especulação em afirmação."
-
-    if tipo == "CASO RESOLVIDO/ATUALIZAÇÃO":
-        blocos[0] = "1. Abertura fria: depois de anos sem resposta, uma informação mudou o caso."
-        blocos[6] = "7. Fechamento: explicar o que foi resolvido, o que ainda falta e por que isso funciona melhor como short ou atualização."
-
-    if ano and ano != "Não identificado":
-        blocos[1] += f" Ano base detectado: {ano}."
-
-    return blocos
-
-
-def pesquisa_necessaria(row):
-    tipo = str(row.get("Tipo de Caso", ""))
-    link = str(row.get("Link", ""))
-
-    itens = [
-        "Tratar o Reddit apenas como ponto de partida, nunca como fonte final.",
-        "Confirmar dados em fontes primárias: polícia local, NamUs, Charley Project, Doe Network, FBI ou registros oficiais.",
-        "Montar linha do tempo com datas confirmadas e separar fato, hipótese e opinião de usuário.",
-        "Buscar mapa do local, distância entre pontos principais e imagens públicas/licenciáveis.",
-        "Checar se houve atualização recente antes de gravar.",
-    ]
-
-    if tipo == "IDENTIDADE DESCONHECIDA":
-        itens.append("Pesquisar reconstruções faciais, perfil odontológico, roupas, objetos e exclusões oficiais de possíveis identidades.")
-
-    if tipo == "DESAPARECIMENTO ABERTO":
-        itens.append("Verificar boletim de desaparecimento, último contato confirmado, veículo, celular, câmeras e movimentação bancária quando disponível.")
-
-    if tipo == "CASO RESOLVIDO/ATUALIZAÇÃO":
-        itens.append("Confirmar a atualização em fonte oficial antes de publicar: prisão, identificação, DNA, recuperação de restos ou decisão judicial.")
-
-    if link:
-        itens.append(f"Link de partida: {link}")
-
-    return itens
-
-
-def sugestao_visual(row):
-    tipo = str(row.get("Tipo de Caso", ""))
-    elementos = normalizar(row.get("Elementos Detectados", ""))
-
-    broll = [
-        "Mapa animado com rota e pontos principais.",
-        "Recortes de documentos e manchetes com zoom lento.",
-        "Fotos de localidade em clima documental, sem gore e sem sensacionalismo.",
-        "Timeline visual com datas confirmadas."
-    ]
-
-    if "cctv" in elementos or "footage" in elementos or "camera" in elementos:
-        broll.append("Recriação visual de câmera de segurança sem simular prova falsa.")
-
-    if "forest" in elementos or "wilderness" in elementos or "trailhead" in elementos:
-        broll.append("Estradas, trilhas, placas, mata fechada e paisagens de isolamento.")
-
-    if "river" in elementos or "canal" in elementos:
-        broll.append("Água escura, ponte, margem, correnteza e plano aberto do local. Evitar imagens explícitas.")
-
-    if tipo == "IDENTIDADE DESCONHECIDA":
-        broll.append("Silhueta, ficha de identificação, objetos pessoais e close em detalhes não gráficos.")
-
-    return broll
-
-
-def sugestao_thumbnail(row):
-    tipo = str(row.get("Tipo de Caso", ""))
-    ano = str(row.get("Ano do Caso", ""))
-
-    if tipo == "IDENTIDADE DESCONHECIDA":
-        return f"Silhueta sem rosto + etiqueta 'SEM NOME' + ano {ano}. Paleta escura, documento antigo e mapa ao fundo."
-
-    if tipo == "DESAPARECIMENTO ABERTO":
-        return f"Mapa/local isolado + marcador vermelho + texto curto: 'SUMIU EM {ano}' ou 'ÚLTIMO RASTRO'."
-
-    if tipo == "CASO RESOLVIDO/ATUALIZAÇÃO":
-        return "Antes/depois editorial: '50 ANOS DEPOIS' / 'DNA REVELOU?' com visual de arquivo policial."
-
-    if tipo == "CASO FAMOSO/SATURADO":
-        return "Evitar rosto/foto conhecida como centro. Usar detalhe novo: mapa, horário, objeto ou última câmera."
-
-    return "Imagem de local + documento desfocado + pergunta curta e forte, sem exagero visual."
-
-
-def gerar_markdown_briefing(df):
-    if df.empty:
-        return "# Briefings Sem Rastros\n\nNenhum caso aprovado para briefing nesta execução.\n"
-
-    df_brief = df[df["Decisão Editorial"].isin([
-        "PRIORIDADE DE ROTEIRO",
-        "ENTRA NA LISTA CURTA",
-        "USAR COMO ATUALIZAÇÃO/SHORT",
-        "USAR COMO NOTA CURTA",
-        "APENAS COM GANCHO DIFERENCIADO",
-    ])].copy()
-
-    if df_brief.empty:
-        df_brief = df.head(10).copy()
-
-    linhas = [
-        "# Briefings Editoriais — Sem Rastros",
-        "",
-        "Documento gerado automaticamente pelo Radar Cinematográfico Profissional.",
-        "Use estes briefings como base de apuração, não como roteiro final sem checagem.",
-        "",
-    ]
-
-    for i, (_, row) in enumerate(df_brief.head(12).iterrows(), start=1):
-        linhas.extend([
-            f"## {i}. {row['Caso']}",
-            "",
-            f"**Score:** {row['Score']}  ",
-            f"**Classificação:** {row['Classificação']}  ",
-            f"**Tipo de Caso:** {row['Tipo de Caso']}  ",
-            f"**Uso recomendado:** {row['Uso Recomendado']}  ",
-            f"**Decisão editorial:** {row['Decisão Editorial']}  ",
-            f"**Segurança da pauta:** {row['Segurança da Pauta']}  ",
-            f"**Ano do caso:** {row['Ano do Caso']}  ",
-            "",
-            f"### Título provisório\n{titulo_provisorio(row)}",
-            "",
-            f"### Promessa do vídeo\n{promessa_do_video(row)}",
-            "",
-            f"### Ângulo narrativo\n{angulo_narrativo(row)}",
-            "",
-            f"### Hook\n{row['Hook']}",
-            "",
-            "### Estrutura sugerida",
-        ])
-
-        for bloco in estrutura_roteiro(row):
-            linhas.append(f"- {bloco}")
-
-        linhas.extend(["", "### Pesquisa obrigatória"])
-        for item in pesquisa_necessaria(row):
-            linhas.append(f"- {item}")
-
-        linhas.extend(["", "### B-roll e visual"])
-        for item in sugestao_visual(row):
-            linhas.append(f"- {item}")
-
-        linhas.extend([
-            "",
-            f"### Thumbnail\n{sugestao_thumbnail(row)}",
-            "",
-            f"### Motivo editorial\n{row['Motivo Editorial']}",
-            "",
-            "---",
-            "",
-        ])
-
-    return "\n".join(linhas).strip() + "\n"
-
-
-def salvar_briefing_markdown(df):
-    os.makedirs(PASTA_RESULTADOS, exist_ok=True)
-    conteudo = gerar_markdown_briefing(df)
-    with open(BRIEFING_MD_SAIDA, "w", encoding="utf-8") as arquivo:
-        arquivo.write(conteudo)
-
-
-def gerar_briefing_pdf(df):
-    os.makedirs(PASTA_RESULTADOS, exist_ok=True)
-
-    pdf = SimpleDocTemplate(BRIEFING_PDF_SAIDA)
-    styles = getSampleStyleSheet()
-    conteudo = []
-
-    conteudo.append(Paragraph("<b>BRIEFINGS EDITORIAIS — SEM RASTROS</b>", styles["Title"]))
-    conteudo.append(Spacer(1, 18))
-
-    if df.empty:
-        conteudo.append(Paragraph("Nenhum caso aprovado para briefing nesta execução.", styles["BodyText"]))
-        pdf.build(conteudo)
-        return
-
-    df_brief = df[df["Decisão Editorial"].isin([
-        "PRIORIDADE DE ROTEIRO",
-        "ENTRA NA LISTA CURTA",
-        "USAR COMO ATUALIZAÇÃO/SHORT",
-        "USAR COMO NOTA CURTA",
-        "APENAS COM GANCHO DIFERENCIADO",
-    ])].copy()
-
-    if df_brief.empty:
-        df_brief = df.head(10).copy()
-
-    for i, (_, row) in enumerate(df_brief.head(12).iterrows(), start=1):
-        estrutura_html = "<br/>".join(seguro_pdf(item) for item in estrutura_roteiro(row))
-        pesquisa_html = "<br/>".join(seguro_pdf(item) for item in pesquisa_necessaria(row)[:6])
-        visual_html = "<br/>".join(seguro_pdf(item) for item in sugestao_visual(row)[:6])
-
-        texto = f"""
-        <b>{i}. Caso:</b> {seguro_pdf(row['Caso'])}<br/>
-        <b>Score:</b> {seguro_pdf(row['Score'])}<br/>
-        <b>Tipo:</b> {seguro_pdf(row['Tipo de Caso'])}<br/>
-        <b>Uso recomendado:</b> {seguro_pdf(row['Uso Recomendado'])}<br/>
-        <b>Decisão editorial:</b> {seguro_pdf(row['Decisão Editorial'])}<br/>
-        <b>Título provisório:</b> {seguro_pdf(titulo_provisorio(row))}<br/>
-        <b>Promessa:</b> {seguro_pdf(promessa_do_video(row))}<br/>
-        <b>Ângulo narrativo:</b> {seguro_pdf(angulo_narrativo(row))}<br/>
-        <b>Hook:</b> {seguro_pdf(row['Hook'])}<br/>
-        <b>Estrutura sugerida:</b><br/>{estrutura_html}<br/>
-        <b>Pesquisa obrigatória:</b><br/>{pesquisa_html}<br/>
-        <b>B-roll e visual:</b><br/>{visual_html}<br/>
-        <b>Thumbnail:</b> {seguro_pdf(sugestao_thumbnail(row))}<br/><br/>
-        """
-        conteudo.append(Paragraph(texto, styles["BodyText"]))
-        conteudo.append(Spacer(1, 20))
-
-    pdf.build(conteudo)
-
-
-def gerar_briefings(df):
-    salvar_briefing_markdown(df)
-    gerar_briefing_pdf(df)
-
-
 # =========================================================
 # COLETA RSS
 # =========================================================
@@ -1301,9 +874,6 @@ def processar_posts(posts):
         if titulo_meta_ou_inutil(titulo):
             continue
 
-        if fora_escopo_sem_rastros(titulo, resumo, link):
-            continue
-
         chave_titulo = normalizar(titulo)
         chave_link = link.lower()
 
@@ -1323,7 +893,7 @@ def processar_posts(posts):
             resumo
         )
 
-        if score < 55:
+        if score < 50:
             continue
 
         if resumo_util:
@@ -1401,11 +971,7 @@ def gerar_pdf(df):
         """
         conteudo.append(Paragraph(texto, styles["BodyText"]))
     else:
-        df_pdf = df[df["Decisão Editorial"] != "DESCARTAR POR ENQUANTO"].copy()
-        if df_pdf.empty:
-            df_pdf = df.copy()
-
-        for _, row in df_pdf.head(20).iterrows():
+        for _, row in df.head(20).iterrows():
             texto = f"""
             <b>Caso:</b> {seguro_pdf(row['Caso'])}<br/>
             <b>Resumo:</b> {seguro_pdf(row['Resumo Original'])}<br/>
@@ -1451,8 +1017,6 @@ def main():
     print(f"TOTAL DE CASOS APROVADOS: {len(df)}")
     print(f"CSV SALVO EM: {CSV_SAIDA}")
     print(f"PDF SALVO EM: {PDF_SAIDA}")
-    print(f"BRIEFING MD SALVO EM: {BRIEFING_MD_SAIDA}")
-    print(f"BRIEFING PDF SALVO EM: {BRIEFING_PDF_SAIDA}")
 
 
 if __name__ == "__main__":
