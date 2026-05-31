@@ -10,7 +10,7 @@ from datetime import datetime
 
 
 # =========================================================
-# RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS - V4.3
+# RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS - V4.2
 # =========================================================
 
 ANO_ATUAL = datetime.now().year
@@ -26,7 +26,7 @@ RSS_FEEDS = [
     "https://www.reddit.com/r/UnsolvedMysteries/.rss",
 ]
 
-USER_AGENT = "SemRastrosRadar/4.3"
+USER_AGENT = "SemRastrosRadar/4.2"
 
 COLUNAS = [
     "Caso",
@@ -127,60 +127,6 @@ def titulo_meta_ou_inutil(titulo):
     ]
 
     return any(b in titulo for b in bloqueios)
-
-
-def fora_escopo_sem_rastros(titulo, resumo, link=""):
-    """
-    Remove posts de true crime comum que até podem ser interessantes,
-    mas não são bons para o posicionamento do Sem Rastros: desaparecimentos,
-    identidades desconhecidas, mistérios abertos e investigações documentais.
-    """
-    texto = normalizar(f"{titulo} {resumo}")
-    titulo_norm = normalizar(titulo)
-    link_norm = normalizar(link)
-
-    nucleo_sem_rastros = [
-        "missing",
-        "disappeared",
-        "vanished",
-        "still missing",
-        "never found",
-        "no trace",
-        "unsolved",
-        "cold case",
-        "jane doe",
-        "john doe",
-        "unidentified",
-        "who was",
-        "who is",
-        "what happened",
-        "found dead",
-        "body found",
-        "remains",
-    ]
-
-    tem_nucleo = any(t in texto for t in nucleo_sem_rastros)
-
-    # Condenações/crimes comuns com autor conhecido costumam gerar pauta fraca
-    # para o canal, salvo quando há mistério, identidade desconhecida ou caso aberto.
-    truecrime_comum = [
-        "sentenced to death",
-        "death row",
-        "serial rapist",
-        "fatally shot a police officer",
-        "patrolman",
-        "was indicted",
-        "parole violation",
-    ]
-
-    if any(t in texto for t in truecrime_comum) and not tem_nucleo:
-        return True
-
-    # Filtro extra para r/TrueCrime: evita casos apenas criminais/condenatórios.
-    if "r/truecrime" in link_norm and any(t in titulo_norm for t in truecrime_comum):
-        return True
-
-    return False
 
 
 # =========================================================
@@ -320,11 +266,9 @@ def extrair_ano_contextual(titulo, resumo):
 
 def detectar_status(titulo, resumo):
     """
-    Classifica status com cautela editorial.
-    A ordem importa:
-    1. títulos claramente resolvidos/atualização vencem;
-    2. sinais fortes de caso aberto vencem menções secundárias;
-    3. só depois entram resoluções citadas no corpo do texto.
+    Classifica status com cautela.
+    Não marca como resolvido só porque o texto menciona 'identified',
+    'recovered' ou 'arrest' em contexto secundário.
     """
     titulo_norm = normalizar(titulo)
     texto = normalizar(f"{titulo} {resumo}")
@@ -346,7 +290,27 @@ def detectar_status(titulo, resumo):
     if any(t in titulo_norm for t in termos_resolvido_titulo):
         return "RESOLVIDO/ATUALIZAÇÃO"
 
-    termos_aberto_fortes = [
+    termos_resolvido_resumo = [
+        "officially arrested",
+        "has been arrested",
+        "was arrested",
+        "has been named",
+        "identified the killer",
+        "killer has been identified",
+        "case was solved",
+        "case has been solved",
+        "dna match",
+        "genetic genealogy breakthrough",
+        "recovered the remains",
+        "confirmed her identity",
+        "confirmed his identity",
+        "provided investigators a location",
+    ]
+
+    if any(t in texto for t in termos_resolvido_resumo):
+        return "RESOLVIDO/ATUALIZAÇÃO"
+
+    termos_aberto = [
         "still missing",
         "has been missing",
         "been missing",
@@ -368,43 +332,17 @@ def detectar_status(titulo, resumo):
         "who was",
         "who is",
         "no arrests",
-        "no arrest",
-        "no one has been arrested",
         "no suspect",
-        "no known suspect",
         "no confirmed sightings",
         "no one has been charged",
         "remains unsolved",
-        "unresolved",
         "not been solved",
         "no closer to finding",
         "never seen again",
-        "no definitive answer",
-        "no definitive answers",
     ]
 
-    if any(t in texto for t in termos_aberto_fortes):
+    if any(t in texto for t in termos_aberto):
         return "ABERTO"
-
-    termos_resolvido_resumo = [
-        "officially arrested",
-        "has been arrested",
-        "was arrested",
-        "has been named",
-        "identified the killer",
-        "killer has been identified",
-        "case was solved",
-        "case has been solved",
-        "dna match",
-        "genetic genealogy breakthrough",
-        "recovered the remains",
-        "confirmed her identity",
-        "confirmed his identity",
-        "provided investigators a location",
-    ]
-
-    if any(t in texto for t in termos_resolvido_resumo):
-        return "RESOLVIDO/ATUALIZAÇÃO"
 
     return "INDEFINIDO"
 
@@ -934,9 +872,6 @@ def processar_posts(posts):
             continue
 
         if titulo_meta_ou_inutil(titulo):
-            continue
-
-        if fora_escopo_sem_rastros(titulo, resumo, link):
             continue
 
         chave_titulo = normalizar(titulo)
