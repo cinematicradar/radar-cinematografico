@@ -1,4 +1,4 @@
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet
 import feedparser
 import pandas as pd
@@ -10,7 +10,12 @@ from datetime import datetime
 
 
 # =========================================================
-# RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS - V4.2
+# RADAR CINEMATOGRÁFICO PROFISSIONAL SEM RASTROS - V5.3
+# Gera automaticamente:
+# 1) resultados/casos_cinematicos.csv
+# 2) resultados/dossie_cinematografico.pdf
+# 3) resultados/briefings_sem_rastros.md
+# 4) resultados/briefings_sem_rastros.pdf
 # =========================================================
 
 ANO_ATUAL = datetime.now().year
@@ -18,6 +23,8 @@ ANO_ATUAL = datetime.now().year
 PASTA_RESULTADOS = "resultados"
 CSV_SAIDA = os.path.join(PASTA_RESULTADOS, "casos_cinematicos.csv")
 PDF_SAIDA = os.path.join(PASTA_RESULTADOS, "dossie_cinematografico.pdf")
+BRIEFING_MD_SAIDA = os.path.join(PASTA_RESULTADOS, "briefings_sem_rastros.md")
+BRIEFING_PDF_SAIDA = os.path.join(PASTA_RESULTADOS, "briefings_sem_rastros.pdf")
 
 RSS_FEEDS = [
     "https://www.reddit.com/r/UnresolvedMysteries/.rss",
@@ -26,7 +33,7 @@ RSS_FEEDS = [
     "https://www.reddit.com/r/UnsolvedMysteries/.rss",
 ]
 
-USER_AGENT = "SemRastrosRadar/4.2"
+USER_AGENT = "SemRastrosRadar/5.3"
 
 COLUNAS = [
     "Caso",
@@ -50,28 +57,24 @@ COLUNAS = [
 
 
 # =========================================================
-# LIMPEZA DE TEXTO
+# LIMPEZA E UTILITÁRIOS
 # =========================================================
 
 def limpar_html(texto):
     texto = html.unescape(str(texto or ""))
     texto = re.sub(r"<[^>]+>", " ", texto)
-    texto = re.sub(r"\s+", " ", texto).strip()
-
     texto = re.sub(
         r"\s*submitted by\s*/u/.*$",
         "",
         texto,
         flags=re.IGNORECASE
     ).strip()
-
     texto = re.sub(
         r"\s*\[link\]\s*\[comments\]\s*$",
         "",
         texto,
         flags=re.IGNORECASE
     ).strip()
-
     texto = re.sub(r"\s+", " ", texto).strip()
     return texto
 
@@ -129,26 +132,66 @@ def titulo_meta_ou_inutil(titulo):
     return any(b in titulo for b in bloqueios)
 
 
+def fora_escopo_sem_rastros(titulo, resumo, link=""):
+    texto = normalizar(f"{titulo} {resumo}")
+    link_norm = normalizar(link)
+
+    nucleo_sem_rastros = [
+        "missing",
+        "disappeared",
+        "vanished",
+        "still missing",
+        "never found",
+        "no trace",
+        "unsolved",
+        "cold case",
+        "jane doe",
+        "john doe",
+        "unidentified",
+        "who was",
+        "who is",
+        "what happened",
+        "found dead",
+        "body found",
+        "remains",
+        "no arrests",
+        "no suspect",
+    ]
+
+    tem_nucleo = any(t in texto for t in nucleo_sem_rastros)
+
+    truecrime_comum = [
+        "sentenced to death",
+        "death row",
+        "serial rapist",
+        "fatally shot a police officer",
+        "patrolman",
+        "was indicted",
+        "parole violation",
+        "pleaded guilty",
+        "convicted killer",
+        "executed",
+        "death sentence",
+    ]
+
+    if any(t in texto for t in truecrime_comum) and not tem_nucleo:
+        return True
+
+    if "r/truecrime" in link_norm and any(t in texto for t in truecrime_comum):
+        return True
+
+    return False
+
+
 # =========================================================
 # EXTRAÇÃO INTELIGENTE DO ANO DO CASO
 # =========================================================
 
 def extrair_ano_contextual(titulo, resumo):
-    """
-    Extrai o ano mais provável do evento principal do caso.
-
-    Regra profissional:
-    1. Se o título contém ano e termos de caso, o ano do título tem prioridade.
-    2. Depois, procura expressões diretamente ligadas ao evento:
-       missing since, went missing, last seen, found dead, murdered, body found etc.
-    3. Ignora anos de nascimento, NamUs, podcast, reportagem, documentário,
-       "current age", "added in", eventos secundários e referências históricas.
-    """
     titulo_norm = normalizar(titulo)
-    texto_total = limpar_html(f"{titulo}. {resumo}")
-    texto = normalizar(texto_total)
+    texto_total = normalizar(f"{titulo}. {resumo}")
 
-    termos_de_caso_no_titulo = [
+    termos_titulo = [
         "missing",
         "disappeared",
         "vanished",
@@ -173,8 +216,7 @@ def extrair_ano_contextual(titulo, resumo):
         int(a) for a in re.findall(r"\b(19\d{2}|20[0-2]\d)\b", titulo_norm)
     ]
 
-    # Quando o título já descreve o evento, ele costuma ser mais confiável que o resumo.
-    if anos_titulo and any(t in titulo_norm for t in termos_de_caso_no_titulo):
+    if anos_titulo and any(t in titulo_norm for t in termos_titulo):
         ano = min(anos_titulo)
         return ano, ANO_ATUAL - ano
 
@@ -184,37 +226,21 @@ def extrair_ano_contextual(titulo, resumo):
         "sep|sept|oct|nov|dec"
     )
 
-    padroes_fortes = [
-        rf"(?:missing since|went missing|reported missing|listed as missing|has been missing|"
-        rf"last seen|last contacted|last confirmed contact|disappeared|vanished|vanishes)"
-        rf"[^.?!]{{0,100}}\b(19\d{{2}}|20[0-2]\d)\b",
-
-        rf"\b(19\d{{2}}|20[0-2]\d)\b[^.?!]{{0,100}}"
-        rf"(?:went missing|reported missing|listed as missing|has been missing|last seen|"
-        rf"last contacted|last confirmed contact|disappeared|vanished|vanishes)",
-
-        rf"(?:found dead|body was found|body found|remains were found|remains found|"
-        rf"was murdered|murdered|killed|homicide|death occurred)"
-        rf"[^.?!]{{0,100}}\b(19\d{{2}}|20[0-2]\d)\b",
-
-        rf"\b(19\d{{2}}|20[0-2]\d)\b[^.?!]{{0,100}}"
-        rf"(?:found dead|body was found|body found|remains were found|remains found|"
-        rf"was murdered|murdered|killed|homicide)",
-
-        rf"(?:on|in|since|from|around)\s+"
-        rf"(?:(?:{meses})\s+)?"
-        rf"(?:\d{{1,2}}(?:st|nd|rd|th)?(?:,)?\s+)?"
-        rf"\b(19\d{{2}}|20[0-2]\d)\b",
+    padroes = [
+        rf"(?:missing since|went missing|reported missing|listed as missing|has been missing|last seen|last contacted|last confirmed contact|disappeared|vanished|vanishes)[^.?!]{{0,100}}\b(19\d{{2}}|20[0-2]\d)\b",
+        rf"\b(19\d{{2}}|20[0-2]\d)\b[^.?!]{{0,100}}(?:went missing|reported missing|listed as missing|has been missing|last seen|last contacted|last confirmed contact|disappeared|vanished|vanishes)",
+        rf"(?:found dead|body was found|body found|remains were found|remains found|was murdered|murdered|killed|homicide|death occurred)[^.?!]{{0,100}}\b(19\d{{2}}|20[0-2]\d)\b",
+        rf"\b(19\d{{2}}|20[0-2]\d)\b[^.?!]{{0,100}}(?:found dead|body was found|body found|remains were found|remains found|was murdered|murdered|killed|homicide)",
+        rf"(?:on|in|since|from|around)\s+(?:{meses})?\s*\d{{0,2}}[^.?!]{{0,35}}\b(19\d{{2}}|20[0-2]\d)\b[^.?!]{{0,80}}(?:missing|disappeared|vanished|murdered|found dead|body found|remains|last seen)",
     ]
 
-    termos_exclusao_janela = [
+    termos_exclusao = [
         "born",
-        "was born",
         "dob",
         "date of birth",
         "current age",
         "age at disappearance",
-        "age at the time",
+        "was born",
         "released in",
         "episode",
         "podcast",
@@ -222,56 +248,74 @@ def extrair_ano_contextual(titulo, resumo):
         "documentary",
         "case number",
         "namus",
+        "as of",
         "report from",
         "reports from",
-        "as of",
         "posted",
         "submitted",
         "added in",
         "grammys",
-        "attendance",
-        "school to study",
-        "graduated",
-        "formed in",
-        "sentenced in",
+        "school year",
+        "class of",
     ]
 
     candidatos = []
 
-    for prioridade, padrao in enumerate(padroes_fortes):
-        for match in re.finditer(padrao, texto, flags=re.IGNORECASE):
+    for prioridade, padrao in enumerate(padroes):
+        for match in re.finditer(padrao, texto_total, flags=re.IGNORECASE):
             ano = int(match.group(1))
 
-            inicio = max(0, match.start() - 100)
-            fim = min(len(texto), match.end() + 100)
-            janela = texto[inicio:fim]
+            inicio = max(0, match.start() - 90)
+            fim = min(len(texto_total), match.end() + 90)
+            janela = texto_total[inicio:fim]
 
-            if any(ex in janela for ex in termos_exclusao_janela):
+            if any(ex in janela for ex in termos_exclusao):
                 continue
 
             if 1900 <= ano <= ANO_ATUAL:
                 candidatos.append((prioridade, ano))
 
     if candidatos:
-        # Prioridade menor é melhor; dentro da mesma prioridade, ano mais antigo tende a ser o evento.
         candidatos.sort(key=lambda item: (item[0], item[1]))
         ano = candidatos[0][1]
         return ano, ANO_ATUAL - ano
 
     return None, None
 
+
 # =========================================================
 # STATUS E TIPO DE CASO
 # =========================================================
 
 def detectar_status(titulo, resumo):
-    """
-    Classifica status com cautela.
-    Não marca como resolvido só porque o texto menciona 'identified',
-    'recovered' ou 'arrest' em contexto secundário.
-    """
     titulo_norm = normalizar(titulo)
     texto = normalizar(f"{titulo} {resumo}")
+
+    termos_aberto = [
+        "still missing",
+        "never found",
+        "no trace",
+        "case is still open",
+        "unsolved",
+        "where is",
+        "what happened to",
+        "what became of",
+        "who was",
+        "who is",
+        "no arrests",
+        "no suspect",
+        "no confirmed sightings",
+        "never seen him again",
+        "never seen her again",
+        "family continues to search",
+        "remains unidentified",
+        "still has no name",
+        "no name",
+        "unidentified victim",
+    ]
+
+    if any(t in texto for t in termos_aberto):
+        return "ABERTO"
 
     termos_resolvido_titulo = [
         "killer identified",
@@ -284,7 +328,6 @@ def detectar_status(titulo, resumo):
         "remains have been recovered",
         "body has been recovered",
         "recovered in",
-        "recovered from",
     ]
 
     if any(t in titulo_norm for t in termos_resolvido_titulo):
@@ -293,58 +336,21 @@ def detectar_status(titulo, resumo):
     termos_resolvido_resumo = [
         "officially arrested",
         "has been arrested",
-        "was arrested",
         "has been named",
         "identified the killer",
-        "killer has been identified",
         "case was solved",
-        "case has been solved",
         "dna match",
         "genetic genealogy breakthrough",
         "recovered the remains",
         "confirmed her identity",
         "confirmed his identity",
-        "provided investigators a location",
     ]
 
     if any(t in texto for t in termos_resolvido_resumo):
         return "RESOLVIDO/ATUALIZAÇÃO"
 
-    termos_aberto = [
-        "still missing",
-        "has been missing",
-        "been missing",
-        "listed as missing",
-        "listed as a missing person",
-        "is listed as a missing person",
-        "missing from",
-        "missing since",
-        "never came home",
-        "still has no name",
-        "has no name",
-        "no name",
-        "never found",
-        "no trace",
-        "case is still open",
-        "unsolved",
-        "where is",
-        "what happened to",
-        "who was",
-        "who is",
-        "no arrests",
-        "no suspect",
-        "no confirmed sightings",
-        "no one has been charged",
-        "remains unsolved",
-        "not been solved",
-        "no closer to finding",
-        "never seen again",
-    ]
-
-    if any(t in texto for t in termos_aberto):
-        return "ABERTO"
-
     return "INDEFINIDO"
+
 
 def caso_famoso_ou_saturado(titulo):
     titulo = normalizar(titulo)
@@ -371,6 +377,9 @@ def detectar_tipo_caso(titulo, resumo, status):
         return "CASO FAMOSO/SATURADO"
 
     if status == "RESOLVIDO/ATUALIZAÇÃO":
+        if any(t in texto for t in ["jane doe", "john doe", "unidentified", "no name"]):
+            return "IDENTIDADE DESCONHECIDA"
+
         return "CASO RESOLVIDO/ATUALIZAÇÃO"
 
     if any(t in texto for t in [
@@ -380,28 +389,20 @@ def detectar_tipo_caso(titulo, resumo, status):
         "unidentified remains",
         "unidentified victim",
         "still has no name",
-        "has no name",
         "no name",
     ]):
         return "IDENTIDADE DESCONHECIDA"
 
     if any(t in texto for t in [
         "still missing",
-        "has been missing",
-        "been missing",
-        "listed as missing",
-        "listed as a missing person",
-        "is listed as a missing person",
-        "missing from",
-        "missing since",
-        "missing person",
         "went missing",
         "reported missing",
         "disappeared",
         "vanished",
         "never found",
         "no trace",
-        "never seen again",
+        "what became of",
+        "missing from",
     ]):
         return "DESAPARECIMENTO ABERTO"
 
@@ -414,11 +415,14 @@ def detectar_tipo_caso(titulo, resumo, status):
         "shot to death",
         "stabbed",
         "killed",
-        "death was listed as undetermined",
+        "drownings",
+        "death",
+        "deaths",
     ]):
         return "HOMICÍDIO/MORTE SUSPEITA"
 
     return "CASO DE APOIO/PESQUISA"
+
 
 # =========================================================
 # SCORE PROFISSIONAL
@@ -462,7 +466,6 @@ def calcular_score_profissional(titulo, resumo):
             "disappearance": 16,
             "disappeared": 16,
             "vanished": 20,
-            "vanishes": 18,
             "without trace": 22,
             "no trace": 20,
             "never found": 20,
@@ -518,7 +521,7 @@ def calcular_score_profissional(titulo, resumo):
             elementos,
             "tempo sem solução",
             modo="max",
-        )
+        ),
     )
 
     categorias["Tempo Sem Solução"] = min(tempo, 15)
@@ -759,6 +762,7 @@ def decisao_editorial(score, status, tipo, resumo_util):
 
     return "DESCARTAR POR ENQUANTO"
 
+
 def seguranca_pauta(score, resumo_util, status):
     if score >= 74 and resumo_util and status != "INDEFINIDO":
         return "ALTA"
@@ -874,6 +878,9 @@ def processar_posts(posts):
         if titulo_meta_ou_inutil(titulo):
             continue
 
+        if fora_escopo_sem_rastros(titulo, resumo, link):
+            continue
+
         chave_titulo = normalizar(titulo)
         chave_link = link.lower()
 
@@ -893,7 +900,13 @@ def processar_posts(posts):
             resumo
         )
 
-        if score < 50:
+        if score < 55:
+            continue
+
+        uso = uso_recomendado(score, status, tipo, resumo_util)
+        decisao = decisao_editorial(score, status, tipo, resumo_util)
+
+        if decisao == "DESCARTAR POR ENQUANTO":
             continue
 
         if resumo_util:
@@ -904,8 +917,6 @@ def processar_posts(posts):
                 "abrir o link para apuração completa antes da produção."
             )
 
-        uso = uso_recomendado(score, status, tipo, resumo_util)
-
         dados.append({
             "Caso": titulo,
             "Resumo Original": resumo_exibido,
@@ -915,7 +926,7 @@ def processar_posts(posts):
             "Classificação": classificacao_caso(score),
             "Tipo de Caso": tipo,
             "Uso Recomendado": uso,
-            "Decisão Editorial": decisao_editorial(score, status, tipo, resumo_util),
+            "Decisão Editorial": decisao,
             "Ano do Caso": ano_caso if ano_caso else "Não identificado",
             "Idade do Caso": idade_caso if idade_caso is not None else "Não identificada",
             "Status Detectado": status,
@@ -929,10 +940,6 @@ def processar_posts(posts):
     return dados
 
 
-# =========================================================
-# SAÍDAS
-# =========================================================
-
 def gerar_dataframe(dados):
     if dados:
         df = pd.DataFrame(dados, columns=COLUNAS)
@@ -942,6 +949,10 @@ def gerar_dataframe(dados):
 
     return df
 
+
+# =========================================================
+# SAÍDAS
+# =========================================================
 
 def salvar_csv(df):
     os.makedirs(PASTA_RESULTADOS, exist_ok=True)
@@ -999,6 +1010,185 @@ def gerar_pdf(df):
 
 
 # =========================================================
+# BRIEFINGS AUTOMÁTICOS
+# =========================================================
+
+def briefing_para_linha(row, indice):
+    caso = str(row.get("Caso", "")).strip()
+    hook = str(row.get("Hook", "")).strip()
+    tipo = str(row.get("Tipo de Caso", "")).strip()
+    uso = str(row.get("Uso Recomendado", "")).strip()
+    motivo = str(row.get("Motivo Editorial", "")).strip()
+    elementos = str(row.get("Elementos Detectados", "")).strip()
+    score = str(row.get("Score", "")).strip()
+    link = str(row.get("Link", "")).strip()
+
+    promessa = hook if hook else "Um caso com perguntas abertas, pistas incompletas e potencial para narrativa documental."
+
+    if "IDENTIDADE DESCONHECIDA" in tipo:
+        angulo = (
+            "Mistério de identidade: quem era a vítima, por que ninguém conseguiu identificá-la "
+            "e quais pistas ainda podem revelar seu nome."
+        )
+        thumbnail = "Rosto parcialmente oculto + texto: 'SEM NOME HÁ ANOS'"
+    elif "DESAPARECIMENTO" in tipo:
+        angulo = (
+            "Desaparecimento sem resposta: reconstruir as últimas horas, o último contato "
+            "e as lacunas que impedem o fechamento do caso."
+        )
+        thumbnail = "Estrada/floresta vazia + texto: 'ELE SUMIU AQUI?'"
+    elif "HOMICÍDIO" in tipo:
+        angulo = (
+            "Morte suspeita com perguntas abertas: analisar cenário, falhas investigativas "
+            "e hipóteses ainda não resolvidas."
+        )
+        thumbnail = "Cena escura + fita policial + texto: 'O DETALHE IGNORADO'"
+    elif "FAMOSO" in tipo:
+        angulo = (
+            "Caso conhecido, mas só vale se houver ângulo novo: focar em detalhe pouco explorado, "
+            "contradição ou última janela temporal."
+        )
+        thumbnail = "Imagem de arquivo estilizada + texto: 'O QUE NÃO CONTARAM'"
+    else:
+        angulo = "Pauta de apoio: usar para pesquisa complementar, short documental ou bloco dentro de episódio maior."
+        thumbnail = "Mapa + documento antigo + texto: 'ARQUIVO ABERTO'"
+
+    return f"""
+## {indice}. {caso}
+
+**Score:** {score}  
+**Tipo:** {tipo}  
+**Uso recomendado:** {uso}  
+**Link:** {link}
+
+### Promessa do vídeo
+{promessa}
+
+### Ângulo narrativo
+{angulo}
+
+### Estrutura sugerida de roteiro
+1. **Abertura fria:** comece pelo detalhe mais inquietante do caso, sem explicar tudo de imediato.
+2. **Quem era a pessoa/vítima:** apresente identidade, rotina, vínculos familiares e contexto humano.
+3. **Linha do tempo:** reconstrua as últimas horas ou o momento da descoberta.
+4. **Pistas materiais:** destaque último registro, local, objeto encontrado, câmera, ligação, testemunha ou ausência de evidência.
+5. **Hipóteses:** apresente teorias sem afirmar culpa sem prova.
+6. **O que ainda falta:** mostre lacunas, documentos, perguntas abertas e caminhos de apuração.
+7. **Fechamento:** finalize com uma pergunta forte para comentário e retenção.
+
+### Pesquisa obrigatória antes de gravar
+- Confirmar dados em fontes primárias: polícia, NamUs, Doe Network, Charley Project, jornais locais ou registros oficiais.
+- Verificar se o caso está aberto, resolvido ou parcialmente atualizado.
+- Procurar fotos, mapas, datas exatas, locais e nomes citados.
+- Separar o que é fato, hipótese e especulação da comunidade.
+
+### B-roll e direção visual
+- Mapas com zoom lento no local do caso.
+- Estradas vazias, rios, florestas, pontes, aeroportos, hotéis ou áreas urbanas conforme o caso.
+- Documentos, recortes de jornal, tela de busca, arquivos antigos e fotografias com leve desfoque.
+- Trilha discreta, clima investigativo, sem sensacionalismo visual.
+
+### Sugestão de thumbnail
+{thumbnail}
+
+### Motivo editorial
+{motivo}
+
+### Elementos detectados
+{elementos}
+""".strip()
+
+
+def gerar_briefings(df):
+    os.makedirs(PASTA_RESULTADOS, exist_ok=True)
+    styles = getSampleStyleSheet()
+
+    if df.empty:
+        md = "# Briefings Sem Rastros\n\nNenhum caso aprovado para briefing nesta execução.\n"
+
+        with open(BRIEFING_MD_SAIDA, "w", encoding="utf-8") as arquivo:
+            arquivo.write(md)
+
+        pdf = SimpleDocTemplate(BRIEFING_PDF_SAIDA)
+        pdf.build([
+            Paragraph("<b>Briefings Sem Rastros</b>", styles["Title"]),
+            Spacer(1, 20),
+            Paragraph("Nenhum caso aprovado para briefing nesta execução.", styles["BodyText"]),
+        ])
+        return
+
+    df_brief = df[df["Decisão Editorial"].isin([
+        "PRIORIDADE DE ROTEIRO",
+        "ENTRA NA LISTA CURTA",
+        "USAR COMO ATUALIZAÇÃO/SHORT",
+        "USAR COMO NOTA CURTA",
+        "APENAS COM GANCHO DIFERENCIADO",
+        "GUARDAR PARA PESQUISA",
+    ])].copy()
+
+    if df_brief.empty:
+        df_brief = df.copy()
+
+    df_brief = df_brief.sort_values(by="Score", ascending=False).head(12)
+
+    blocos = ["# BRIEFINGS EDITORIAIS — SEM RASTROS\n"]
+
+    for indice, (_, row) in enumerate(df_brief.iterrows(), start=1):
+        blocos.append(briefing_para_linha(row, indice))
+        blocos.append("\n---\n")
+
+    md = "\n\n".join(blocos)
+
+    with open(BRIEFING_MD_SAIDA, "w", encoding="utf-8") as arquivo:
+        arquivo.write(md)
+
+    conteudo = [
+        Paragraph("<b>BRIEFINGS EDITORIAIS — SEM RASTROS</b>", styles["Title"]),
+        Spacer(1, 20),
+    ]
+
+    for indice, (_, row) in enumerate(df_brief.iterrows(), start=1):
+        titulo = f"{indice}. {row['Caso']}"
+        conteudo.append(Paragraph(f"<b>{seguro_pdf(titulo)}</b>", styles["Heading2"]))
+
+        campos = [
+            ("Score", row.get("Score", "")),
+            ("Tipo", row.get("Tipo de Caso", "")),
+            ("Uso recomendado", row.get("Uso Recomendado", "")),
+            ("Promessa", row.get("Hook", "")),
+            ("Motivo editorial", row.get("Motivo Editorial", "")),
+            ("Elementos", row.get("Elementos Detectados", "")),
+            ("Link", row.get("Link", "")),
+        ]
+
+        for rotulo, valor in campos:
+            conteudo.append(
+                Paragraph(
+                    f"<b>{seguro_pdf(rotulo)}:</b> {seguro_pdf(valor)}",
+                    styles["BodyText"]
+                )
+            )
+            conteudo.append(Spacer(1, 6))
+
+        estrutura = """
+        <b>Estrutura sugerida:</b><br/>
+        1. Abertura fria com o detalhe mais inquietante.<br/>
+        2. Quem era a pessoa/vítima e qual era o contexto humano.<br/>
+        3. Linha do tempo das últimas horas ou da descoberta.<br/>
+        4. Pistas materiais: local, último registro, câmera, objeto, testemunha ou ausência de evidência.<br/>
+        5. Hipóteses separando fato de especulação.<br/>
+        6. Perguntas abertas e fechamento com chamada para comentários.<br/>
+        """
+
+        conteudo.append(Paragraph(estrutura, styles["BodyText"]))
+        conteudo.append(Spacer(1, 14))
+        conteudo.append(PageBreak())
+
+    pdf = SimpleDocTemplate(BRIEFING_PDF_SAIDA)
+    pdf.build(conteudo)
+
+
+# =========================================================
 # EXECUÇÃO
 # =========================================================
 
@@ -1011,12 +1201,15 @@ def main():
 
     salvar_csv(df)
     gerar_pdf(df)
+    gerar_briefings(df)
 
     print("\nRADAR CINEMATOGRÁFICO PROFISSIONAL FINALIZADO")
     print(f"TOTAL DE POSTS COLETADOS: {len(posts)}")
     print(f"TOTAL DE CASOS APROVADOS: {len(df)}")
     print(f"CSV SALVO EM: {CSV_SAIDA}")
     print(f"PDF SALVO EM: {PDF_SAIDA}")
+    print(f"BRIEFING MD SALVO EM: {BRIEFING_MD_SAIDA}")
+    print(f"BRIEFING PDF SALVO EM: {BRIEFING_PDF_SAIDA}")
 
 
 if __name__ == "__main__":
